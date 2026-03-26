@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::error::CourierError;
 
-/// A connection to a Transit server that speaks RESP3.
+/// A connection to a Transit server over TCP.
 struct TransitConnection {
     reader: BufReader<Box<dyn tokio::io::AsyncRead + Unpin + Send>>,
     writer: BufWriter<Box<dyn tokio::io::AsyncWrite + Unpin + Send>>,
@@ -70,9 +70,9 @@ impl TransitConnection {
         })
     }
 
-    /// Send a RESP3 command and read the response.
+    /// Send a command and read the response.
     async fn send_command(&mut self, args: &[&str]) -> Result<String, CourierError> {
-        // Write RESP3 array.
+        // Write command frame.
         self.writer
             .write_all(format!("*{}\r\n", args.len()).as_bytes())
             .await

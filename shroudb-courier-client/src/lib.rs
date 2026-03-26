@@ -1,7 +1,7 @@
 //! `shroudb-courier-client` — typed Rust client library for ShrouDB Courier.
 //!
 //! Provides a high-level async API for interacting with a Courier server over TCP.
-//! The RESP3 protocol is handled internally — callers never deal with raw frames.
+//! The wire protocol is handled internally — callers never deal with raw frames.
 
 pub mod connection;
 pub mod error;
@@ -165,7 +165,7 @@ impl CourierClient {
         HealthResult::from_response(resp)
     }
 
-    /// Send an arbitrary command and return the raw RESP3 response.
+    /// Send an arbitrary command and return the raw server response.
     pub async fn raw_command(&mut self, args: &[&str]) -> Result<Response, ClientError> {
         self.connection.send_command_strs(args).await
     }

@@ -1,6 +1,6 @@
-//! Lightweight RESP3 client connection.
+//! Lightweight TCP client connection.
 //!
-//! Handles TCP (and optionally TLS) connectivity and RESP3 frame encoding/decoding.
+//! Handles TCP (and optionally TLS) connectivity and frame encoding/decoding.
 
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use crate::error::ClientError;
 use crate::response::Response;
 
-/// A connection to a ShrouDB Courier server that speaks RESP3.
+/// A connection to a ShrouDB Courier server over TCP.
 ///
 /// Supports both plain TCP and TLS transports via boxed trait objects.
 pub struct Connection {
