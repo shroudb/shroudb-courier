@@ -32,8 +32,6 @@ pub struct ServerConfig {
     pub tls_key: Option<PathBuf>,
     pub tls_client_ca: Option<PathBuf>,
     pub rate_limit: Option<u32>,
-    #[serde(default)]
-    pub cors_origins: Option<Vec<String>>,
 }
 
 impl Default for ServerConfig {
@@ -45,7 +43,6 @@ impl Default for ServerConfig {
             tls_key: None,
             tls_client_ca: None,
             rate_limit: None,
-            cors_origins: None,
         }
     }
 }

@@ -2567,18 +2567,14 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
- "serde_json",
  "shroudb-courier-core",
  "shroudb-courier-protocol",
  "shroudb-crypto",
  "tokio",
  "tokio-rustls",
  "toml",
- "tower-http",
  "tracing",
  "tracing-subscriber",
- "uuid",
- "zeroize",
 ]
 
 [[package]]

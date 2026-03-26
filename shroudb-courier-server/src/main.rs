@@ -164,15 +164,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(dir = %templates_dir.display(), "template file watcher started");
     }
 
-    // 11. Start HTTP API server.
+    // 11. Start HTTP server (metrics only).
     {
         let http_config = http::HttpConfig {
             bind: cfg.server.http_bind,
-            template_engine: Arc::clone(&template_engine),
-            adapters: Arc::clone(&adapters),
-            transit: Arc::clone(&transit),
-            auth_registry: Arc::clone(&auth_registry),
-            cors_origins: cfg.server.cors_origins.clone(),
+            metrics_handle: metrics_handle.clone(),
         };
         let http_rx = shutdown_rx.clone();
         tokio::spawn(async move {
