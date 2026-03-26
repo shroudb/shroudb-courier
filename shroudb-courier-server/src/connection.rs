@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use metrics::{counter, gauge};
 use shroudb_courier_protocol::auth::AuthPolicy;
 use shroudb_courier_protocol::resp3::parse_command::parse_command;
 use shroudb_courier_protocol::resp3::reader::read_frame;
@@ -10,14 +9,6 @@ use shroudb_courier_protocol::serialize::response_to_frame;
 use shroudb_courier_protocol::{Command, CommandDispatcher, CommandResponse, Resp3Frame};
 use tokio::io::{AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::watch;
-
-struct ConnectionGuard;
-
-impl Drop for ConnectionGuard {
-    fn drop(&mut self) {
-        gauge!("courier_concurrent_connections").decrement(1.0);
-    }
-}
 
 struct RateLimiter {
     tokens: f64,
@@ -57,9 +48,6 @@ pub async fn handle_connection(
     mut shutdown_rx: watch::Receiver<bool>,
     rate_limit: Option<u32>,
 ) {
-    gauge!("courier_concurrent_connections").increment(1.0);
-    let _conn_guard = ConnectionGuard;
-
     let (reader_half, writer_half) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader_half);
     let mut writer = BufWriter::new(writer_half);
@@ -132,7 +120,6 @@ pub async fn handle_connection(
         if let Command::Auth { ref token } = command {
             match dispatcher.auth_registry().authenticate(token) {
                 Ok(policy) => {
-                    counter!("courier_auth_total", "result" => "ok").increment(1);
                     auth = Some(policy.clone());
                     let response =
                         CommandResponse::Success(shroudb_courier_protocol::ResponseMap::ok());
@@ -146,7 +133,6 @@ pub async fn handle_connection(
                     continue;
                 }
                 Err(e) => {
-                    counter!("courier_auth_total", "result" => "denied").increment(1);
                     let response = CommandResponse::Error(e);
                     let response_frame = response_to_frame(&response);
                     if write_frame(&mut writer, &response_frame).await.is_err() {

@@ -4,7 +4,6 @@
 
 mod config;
 mod connection;
-mod http;
 mod server;
 
 use std::path::PathBuf;
@@ -12,9 +11,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use tokio::sync::RwLock;
-use tracing_subscriber::Layer as _;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 use shroudb_courier_core::adapter::{
     AdapterRegistry, SendGridAdapter, SmtpAdapter, WebhookAdapter,
@@ -46,18 +42,19 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // 2. Load configuration (or use defaults if no config file).
-    let cfg = match config::load(&cli.config)? {
-        Some(cfg) => {
-            init_logging()?;
-            tracing::info!(config = %cli.config.display(), "configuration loaded");
-            cfg
-        }
-        None => {
-            init_logging()?;
-            tracing::info!("no config file found, starting with defaults");
-            config::CourierConfig::default()
-        }
+    let cfg = (config::load(&cli.config)?).unwrap_or_default();
+
+    // 2b. Initialize telemetry (Courier is stateless — no audit file).
+    let _telemetry_guard = {
+        let telemetry_config = shroudb_telemetry::TelemetryConfig {
+            service_name: "courier".into(),
+            audit_file: false,
+            data_dir: None,
+            ..Default::default()
+        };
+        shroudb_telemetry::init_telemetry(&telemetry_config).map_err(|e| anyhow::anyhow!("{e}"))?
     };
+    tracing::info!(config = %cli.config.display(), "configuration loaded");
 
     // 3. Load templates from directory.
     let templates_dir = cfg.templates.dir.clone();
@@ -141,12 +138,7 @@ async fn main() -> anyhow::Result<()> {
         templates_dir.clone(),
     ));
 
-    // 8. Install Prometheus metrics recorder.
-    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .install_recorder()
-        .expect("failed to install metrics recorder");
-
-    // 9. Set up shutdown signal (SIGTERM + SIGINT).
+    // 8. Set up shutdown signal (SIGTERM + SIGINT).
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
         shutdown_signal().await;
@@ -164,45 +156,12 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(dir = %templates_dir.display(), "template file watcher started");
     }
 
-    // 11. Start HTTP server (metrics only).
-    {
-        let http_config = http::HttpConfig {
-            bind: cfg.server.http_bind,
-            metrics_handle: metrics_handle.clone(),
-        };
-        let http_rx = shutdown_rx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = http::run_http_server(http_config, http_rx).await {
-                tracing::error!(error = %e, "HTTP server failed");
-            }
-        });
-    }
-
-    // 12. Run RESP3 server (blocks until shutdown).
+    // 11. Run RESP3 server (blocks until shutdown).
     tracing::info!(bind = %cfg.server.bind, "shroudb-courier ready");
-    server::run(&cfg.server, dispatcher, metrics_handle, shutdown_rx).await?;
+    server::run(&cfg.server, dispatcher, shutdown_rx).await?;
 
     tracing::info!("shroudb-courier shut down cleanly");
     Ok(())
-}
-
-fn init_logging() -> anyhow::Result<()> {
-    let env_filter = resolve_log_filter();
-    let console_layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_filter(env_filter);
-
-    tracing_subscriber::registry().with(console_layer).init();
-
-    Ok(())
-}
-
-fn resolve_log_filter() -> tracing_subscriber::EnvFilter {
-    if let Ok(level) = std::env::var("LOG_LEVEL") {
-        return tracing_subscriber::EnvFilter::new(level);
-    }
-    tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
 }
 
 async fn run_template_watcher(

@@ -21,7 +21,8 @@ shroudb-courier-core = { path = "shroudb-courier-core" }
 shroudb-courier-protocol = { path = "shroudb-courier-protocol" }
 
 # Commons crates (shroudb/commons) — only crypto for SecretBytes/zeroize
-shroudb-crypto = { git = "https://github.com/shroudb/commons.git", tag = "v0.3.0" }
+shroudb-crypto = { git = "https://github.com/shroudb/commons.git", tag = "v0.6.0" }
+shroudb-telemetry = { git = "https://github.com/shroudb/commons.git", tag = "v0.6.0" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -59,7 +60,6 @@ tokio-rustls = "0.26"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 metrics = "0.24"
-metrics-exporter-prometheus = "0.18"
 
 # Utilities
 thiserror = "2"

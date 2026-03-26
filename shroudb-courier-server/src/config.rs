@@ -26,8 +26,6 @@ pub struct CourierConfig {
 pub struct ServerConfig {
     #[serde(default = "default_bind")]
     pub bind: SocketAddr,
-    #[serde(default = "default_http_bind")]
-    pub http_bind: SocketAddr,
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
     pub tls_client_ca: Option<PathBuf>,
@@ -38,7 +36,6 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
-            http_bind: default_http_bind(),
             tls_cert: None,
             tls_key: None,
             tls_client_ca: None,
@@ -49,10 +46,6 @@ impl Default for ServerConfig {
 
 fn default_bind() -> SocketAddr {
     "0.0.0.0:6999".parse().unwrap()
-}
-
-fn default_http_bind() -> SocketAddr {
-    "0.0.0.0:7000".parse().unwrap()
 }
 
 #[derive(Debug, Deserialize)]
