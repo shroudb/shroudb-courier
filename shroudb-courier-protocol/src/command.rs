@@ -28,6 +28,15 @@ pub enum Command {
     /// Authenticate the connection.
     Auth { token: String },
 
+    /// Get subscriber count for a WebSocket channel.
+    ChannelInfo { channel: String },
+
+    /// List active WebSocket channels.
+    ChannelList,
+
+    /// Get total WebSocket connections.
+    Connections,
+
     /// Execute a batch of commands.
     Pipeline(Vec<Command>),
 }
@@ -44,6 +53,9 @@ pub fn command_verb(cmd: &Command) -> &'static str {
         Command::ConfigSet { .. } => "CONFIG",
         Command::ConfigList => "CONFIG",
         Command::Auth { .. } => "AUTH",
+        Command::ChannelInfo { .. } => "CHANNEL_INFO",
+        Command::ChannelList => "CHANNEL_LIST",
+        Command::Connections => "CONNECTIONS",
         Command::Pipeline(_) => "PIPELINE",
     }
 }
@@ -58,6 +70,9 @@ impl Command {
                 | Command::Health
                 | Command::ConfigGet { .. }
                 | Command::ConfigList
+                | Command::ChannelInfo { .. }
+                | Command::ChannelList
+                | Command::Connections
         )
     }
 }

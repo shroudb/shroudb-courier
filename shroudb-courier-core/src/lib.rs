@@ -6,3 +6,5 @@ pub mod delivery;
 pub mod error;
 pub mod template;
 pub mod transit;
+pub mod ws;
+pub mod ws_adapter;

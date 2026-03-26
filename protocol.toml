@@ -77,7 +77,7 @@ python_type = "str"
 typescript_type = "string"
 
 [types.channel]
-description = "Delivery channel (smtp, webhook, sendgrid)"
+description = "Delivery channel (smtp, webhook, sendgrid, ws)"
 wire_type = "bulk_string"
 rust_type = "String"
 python_type = "str"
@@ -159,6 +159,45 @@ simple_response = true
 params = []
 response = [
     { name = "state", type = "string", description = "Server state (READY, STARTING, etc.)" },
+]
+
+[commands.channel_info]
+verb = "CHANNEL_INFO"
+description = "Get subscriber count for a WebSocket channel"
+replica_behavior = "PureRead"
+params = [
+    { name = "channel", type = "string", required = true, position = 1, description = "Channel name" },
+]
+response = [
+    { name = "channel", type = "string", description = "Channel name" },
+    { name = "subscribers", type = "integer", description = "Number of active subscribers" },
+]
+errors = [
+    { code = "BADARG", condition = "WebSocket not enabled" },
+]
+
+[commands.channel_list]
+verb = "CHANNEL_LIST"
+description = "List all active WebSocket channels"
+replica_behavior = "PureRead"
+params = []
+response = [
+    { name = "channels", type = "array", description = "List of active channels with subscriber counts" },
+]
+errors = [
+    { code = "BADARG", condition = "WebSocket not enabled" },
+]
+
+[commands.connections]
+verb = "CONNECTIONS"
+description = "Get total WebSocket connections"
+replica_behavior = "PureRead"
+params = []
+response = [
+    { name = "connections", type = "integer", description = "Total active WebSocket connections" },
+]
+errors = [
+    { code = "BADARG", condition = "WebSocket not enabled" },
 ]
 
 [commands.auth]

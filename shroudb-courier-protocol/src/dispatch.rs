@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use shroudb_courier_core::adapter::AdapterRegistry;
 use shroudb_courier_core::template::TemplateEngine;
 use shroudb_courier_core::transit::TransitDecryptor;
+use shroudb_courier_core::ws::ChannelRegistry;
 
 use crate::auth::{AuthPolicy, AuthRegistry};
 use crate::command::{Command, command_verb};
@@ -24,6 +25,8 @@ pub struct CommandDispatcher {
     templates_dir: PathBuf,
     /// In-memory config store (no WAL — changes are lost on restart).
     config: DashMap<String, String>,
+    /// WebSocket channel registry (None if WebSocket is disabled).
+    ws_registry: Option<Arc<ChannelRegistry>>,
 }
 
 impl CommandDispatcher {
@@ -43,7 +46,14 @@ impl CommandDispatcher {
             auth_registry,
             templates_dir,
             config,
+            ws_registry: None,
         }
+    }
+
+    /// Set the WebSocket channel registry. Must be called before starting the server
+    /// if WebSocket support is enabled.
+    pub fn set_ws_registry(&mut self, registry: Arc<ChannelRegistry>) {
+        self.ws_registry = Some(registry);
     }
 
     pub fn auth_registry(&self) -> &AuthRegistry {
@@ -194,6 +204,51 @@ impl CommandDispatcher {
             }
 
             Command::Auth { .. } => Ok(ResponseMap::ok()),
+
+            Command::ChannelInfo { channel } => {
+                let reg = self
+                    .ws_registry
+                    .as_ref()
+                    .ok_or_else(|| CommandError::BadArg {
+                        message: "WebSocket not enabled".into(),
+                    })?;
+                let count = reg.subscriber_count(&channel).await;
+                Ok(ResponseMap::ok()
+                    .with("channel", ResponseValue::String(channel))
+                    .with("subscribers", ResponseValue::Integer(count as i64)))
+            }
+
+            Command::ChannelList => {
+                let reg = self
+                    .ws_registry
+                    .as_ref()
+                    .ok_or_else(|| CommandError::BadArg {
+                        message: "WebSocket not enabled".into(),
+                    })?;
+                let channels = reg.list_channels().await;
+                let list: Vec<ResponseValue> = channels
+                    .into_iter()
+                    .map(|(name, count)| {
+                        ResponseValue::Map(
+                            ResponseMap::ok()
+                                .with("channel", ResponseValue::String(name))
+                                .with("subscribers", ResponseValue::Integer(count as i64)),
+                        )
+                    })
+                    .collect();
+                Ok(ResponseMap::ok().with("channels", ResponseValue::Array(list)))
+            }
+
+            Command::Connections => {
+                let reg = self
+                    .ws_registry
+                    .as_ref()
+                    .ok_or_else(|| CommandError::BadArg {
+                        message: "WebSocket not enabled".into(),
+                    })?;
+                let total = reg.total_connections().await;
+                Ok(ResponseMap::ok().with("connections", ResponseValue::Integer(total as i64)))
+            }
 
             Command::Pipeline(_) => unreachable!("pipeline handled above"),
         }

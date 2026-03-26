@@ -71,3 +71,5 @@ libc = "0.2"
 notify = "7"
 rustyline = { version = "17", features = ["derive"] }
 rustls-native-certs = "0.8"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

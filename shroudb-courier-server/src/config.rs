@@ -20,6 +20,8 @@ pub struct CourierConfig {
     pub templates: TemplatesConfig,
     #[serde(default)]
     pub adapters: AdaptersConfig,
+    #[serde(default)]
+    pub websocket: WebSocketConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +175,55 @@ pub struct SendGridConfig {
     pub api_key: String,
     pub from_email: String,
     pub from_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebSocketConfig {
+    #[serde(default = "default_ws_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_ws_bind")]
+    pub bind: SocketAddr,
+    #[serde(default = "default_max_channels")]
+    pub max_channels: usize,
+    #[serde(default = "default_max_connections_per_channel")]
+    pub max_connections_per_channel: usize,
+    #[serde(default = "default_channel_buffer_size")]
+    pub channel_buffer_size: usize,
+    #[serde(default)]
+    pub require_auth: bool,
+}
+
+impl Default for WebSocketConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_ws_enabled(),
+            bind: default_ws_bind(),
+            max_channels: default_max_channels(),
+            max_connections_per_channel: default_max_connections_per_channel(),
+            channel_buffer_size: default_channel_buffer_size(),
+            require_auth: false,
+        }
+    }
+}
+
+fn default_ws_enabled() -> bool {
+    true
+}
+
+fn default_ws_bind() -> SocketAddr {
+    "0.0.0.0:7001".parse().unwrap()
+}
+
+fn default_max_channels() -> usize {
+    10_000
+}
+
+fn default_max_connections_per_channel() -> usize {
+    1_000
+}
+
+fn default_channel_buffer_size() -> usize {
+    256
 }
 
 /// Load and parse config file with env var interpolation.

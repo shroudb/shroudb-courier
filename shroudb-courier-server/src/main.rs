@@ -5,6 +5,7 @@
 mod config;
 mod connection;
 mod server;
+mod websocket;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +18,8 @@ use shroudb_courier_core::adapter::{
 };
 use shroudb_courier_core::template::TemplateEngine;
 use shroudb_courier_core::transit::TransitDecryptor;
+use shroudb_courier_core::ws::ChannelRegistry;
+use shroudb_courier_core::ws_adapter::WsAdapter;
 
 #[derive(Parser)]
 #[command(
@@ -109,6 +112,20 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("SendGrid adapter registered");
     }
 
+    // WebSocket adapter + channel registry.
+    let ws_registry = if cfg.websocket.enabled {
+        let registry = ChannelRegistry::new(
+            cfg.websocket.max_channels,
+            cfg.websocket.max_connections_per_channel,
+            cfg.websocket.channel_buffer_size,
+        );
+        adapters.register(Box::new(WsAdapter::new(Arc::clone(&registry))));
+        tracing::info!("WebSocket adapter registered");
+        Some(registry)
+    } else {
+        None
+    };
+
     let adapters = Arc::new(adapters);
     tracing::info!(count = adapters.list().len(), "adapters ready");
 
@@ -130,13 +147,17 @@ async fn main() -> anyhow::Result<()> {
     let auth_registry = Arc::new(config::build_auth_registry(&cfg));
 
     // 7. Create CommandDispatcher.
-    let dispatcher = Arc::new(shroudb_courier_protocol::CommandDispatcher::new(
+    let mut dispatcher = shroudb_courier_protocol::CommandDispatcher::new(
         Arc::clone(&template_engine),
         Arc::clone(&adapters),
         Arc::clone(&transit),
         Arc::clone(&auth_registry),
         templates_dir.clone(),
-    ));
+    );
+    if let Some(ref registry) = ws_registry {
+        dispatcher.set_ws_registry(Arc::clone(registry));
+    }
+    let dispatcher = Arc::new(dispatcher);
 
     // 8. Set up shutdown signal (SIGTERM + SIGINT).
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -156,7 +177,22 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(dir = %templates_dir.display(), "template file watcher started");
     }
 
-    // 11. Run RESP3 server (blocks until shutdown).
+    // 11. Start WebSocket server if enabled.
+    if let Some(ref registry) = ws_registry {
+        let ws_bind = cfg.websocket.bind;
+        let ws_reg = Arc::clone(registry);
+        let ws_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            websocket::run_websocket_server(ws_bind, ws_reg, ws_shutdown_rx).await;
+        });
+        tracing::info!(
+            bind = %cfg.websocket.bind,
+            require_auth = cfg.websocket.require_auth,
+            "WebSocket server started"
+        );
+    }
+
+    // 12. Run RESP3 server (blocks until shutdown).
     tracing::info!(bind = %cfg.server.bind, "shroudb-courier ready");
     server::run(&cfg.server, dispatcher, shutdown_rx).await?;
 

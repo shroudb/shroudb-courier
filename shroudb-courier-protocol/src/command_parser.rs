@@ -21,6 +21,9 @@ pub fn parse_command(strings: Vec<String>) -> Result<Command, CommandError> {
         "HEALTH" => Ok(Command::Health),
         "CONFIG" => parse_config(args),
         "AUTH" => parse_auth(args),
+        "CHANNEL_INFO" => parse_channel_info(args),
+        "CHANNEL_LIST" => Ok(Command::ChannelList),
+        "CONNECTIONS" => Ok(Command::Connections),
         "PIPELINE" => parse_pipeline(&strings),
         _ => Err(CommandError::BadArg {
             message: format!("unknown command: {verb}"),
@@ -69,6 +72,13 @@ fn parse_config(args: &[String]) -> Result<Command, CommandError> {
             message: format!("unknown CONFIG subcommand: {sub}"),
         }),
     }
+}
+
+fn parse_channel_info(args: &[String]) -> Result<Command, CommandError> {
+    require_arg(args, "CHANNEL_INFO", 1)?;
+    Ok(Command::ChannelInfo {
+        channel: args[0].clone(),
+    })
 }
 
 fn parse_auth(args: &[String]) -> Result<Command, CommandError> {

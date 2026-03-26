@@ -79,5 +79,12 @@ pub async fn handle_deliver(
                 Some(e) => ResponseValue::String(e),
                 None => ResponseValue::Null,
             },
+        )
+        .with(
+            "recipients",
+            match receipt.recipients {
+                Some(n) => ResponseValue::Integer(n as i64),
+                None => ResponseValue::Null,
+            },
         ))
 }

@@ -12,6 +12,7 @@ pub enum Channel {
     Sms,
     Webhook,
     Push,
+    Ws,
 }
 
 impl std::fmt::Display for Channel {
@@ -21,6 +22,7 @@ impl std::fmt::Display for Channel {
             Channel::Sms => write!(f, "sms"),
             Channel::Webhook => write!(f, "webhook"),
             Channel::Push => write!(f, "push"),
+            Channel::Ws => write!(f, "ws"),
         }
     }
 }
@@ -82,4 +84,69 @@ pub struct DeliveryReceipt {
     pub status: DeliveryStatus,
     pub delivered_at: u64,
     pub error: Option<String>,
+    /// Number of recipients that received the message (WebSocket fan-out).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipients: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_ws_serde_roundtrip() {
+        let json = serde_json::to_string(&Channel::Ws).unwrap();
+        assert_eq!(json, "\"ws\"");
+
+        let parsed: Channel = serde_json::from_str("\"ws\"").unwrap();
+        assert_eq!(parsed, Channel::Ws);
+    }
+
+    #[test]
+    fn channel_ws_display() {
+        assert_eq!(Channel::Ws.to_string(), "ws");
+    }
+
+    #[test]
+    fn delivery_receipt_with_recipients() {
+        let receipt = DeliveryReceipt {
+            delivery_id: "test-id".into(),
+            channel: Channel::Ws,
+            adapter: "websocket".into(),
+            status: DeliveryStatus::Delivered,
+            delivered_at: 1234567890,
+            error: None,
+            recipients: Some(5),
+        };
+
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(json.contains("\"recipients\":5"));
+
+        let parsed: DeliveryReceipt = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.recipients, Some(5));
+        assert_eq!(parsed.channel, Channel::Ws);
+    }
+
+    #[test]
+    fn delivery_receipt_without_recipients_omits_field() {
+        let receipt = DeliveryReceipt {
+            delivery_id: "test-id".into(),
+            channel: Channel::Email,
+            adapter: "smtp".into(),
+            status: DeliveryStatus::Delivered,
+            delivered_at: 1234567890,
+            error: None,
+            recipients: None,
+        };
+
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(!json.contains("recipients"));
+    }
+
+    #[test]
+    fn delivery_request_ws_channel() {
+        let json = r#"{"channel":"ws","recipient":"enc...","body":"hello"}"#;
+        let req: DeliveryRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.channel, Channel::Ws);
+    }
 }

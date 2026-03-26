@@ -78,6 +78,7 @@ fn make_receipt(
         status,
         delivered_at: now,
         error,
+        recipients: None,
     }
 }
 
