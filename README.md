@@ -277,6 +277,10 @@ client.deliver(r#"{"channel": "ws", "recipient": "room:general", "body": "hello"
 
 Generated client libraries are available via codegen. See [shroudb-courier-client](https://github.com/shroudb/shroudb-courier/tree/main/shroudb-courier-client).
 
+## Replication
+
+Courier is stateless and does not require replication. It connects to other ShrouDB products (Transit) that handle their own replication.
+
 ## What ShrouDB Courier is NOT
 
 - **Not a message queue.** It delivers notifications immediately. There is no retry queue or dead-letter mechanism.
