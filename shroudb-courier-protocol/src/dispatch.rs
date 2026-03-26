@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use dashmap::DashMap;
 use metrics::{counter, histogram};
 use tokio::sync::RwLock;
 
@@ -22,6 +23,8 @@ pub struct CommandDispatcher {
     transit: Arc<TransitDecryptor>,
     auth_registry: Arc<AuthRegistry>,
     templates_dir: PathBuf,
+    /// In-memory config store (no WAL — changes are lost on restart).
+    config: DashMap<String, String>,
 }
 
 impl CommandDispatcher {
@@ -32,12 +35,15 @@ impl CommandDispatcher {
         auth_registry: Arc<AuthRegistry>,
         templates_dir: PathBuf,
     ) -> Self {
+        let config = DashMap::new();
+        config.insert("templates.dir".into(), templates_dir.display().to_string());
         Self {
             template_engine,
             adapters,
             transit,
             auth_registry,
             templates_dir,
+            config,
         }
     }
 
@@ -67,7 +73,14 @@ impl CommandDispatcher {
 
         // Check auth policy if auth is required.
         if self.auth_registry.is_required()
-            && !matches!(cmd, Command::Auth { .. } | Command::Health)
+            && !matches!(
+                cmd,
+                Command::Auth { .. }
+                    | Command::Health
+                    | Command::ConfigGet { .. }
+                    | Command::ConfigSet { .. }
+                    | Command::ConfigList
+            )
         {
             match auth {
                 None => {
@@ -149,6 +162,44 @@ impl CommandDispatcher {
             Command::Health => {
                 let engine = self.template_engine.read().await;
                 handlers::health::handle_health(&engine, &self.adapters)
+            }
+
+            Command::ConfigGet { key } => match self.config.get(&key) {
+                Some(v) => Ok(ResponseMap::ok()
+                    .with("value", ResponseValue::String(v.value().clone()))
+                    .with("source", ResponseValue::String("runtime".into()))),
+                None => Err(CommandError::BadArg {
+                    message: format!("unknown config key: {key}"),
+                }),
+            },
+
+            Command::ConfigSet { key, value } => {
+                if !self.config.contains_key(&key) {
+                    return Err(CommandError::BadArg {
+                        message: format!("unknown config key: {key}"),
+                    });
+                }
+                self.config.insert(key, value);
+                Ok(ResponseMap::ok())
+            }
+
+            Command::ConfigList => {
+                let fields: Vec<_> = self
+                    .config
+                    .iter()
+                    .map(|entry| {
+                        (
+                            entry.key().clone(),
+                            ResponseValue::Map(
+                                ResponseMap::ok()
+                                    .with("value", ResponseValue::String(entry.value().clone()))
+                                    .with("source", ResponseValue::String("runtime".into()))
+                                    .with("mutable", ResponseValue::Boolean(true)),
+                            ),
+                        )
+                    })
+                    .collect();
+                Ok(ResponseMap { fields })
             }
 
             Command::Auth { .. } => Ok(ResponseMap::ok()),

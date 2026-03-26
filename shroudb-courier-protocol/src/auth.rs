@@ -34,8 +34,8 @@ impl AuthPolicy {
     pub fn check(&self, command: &Command) -> Result<(), CommandError> {
         let verb = command_verb(command);
 
-        // AUTH and HEALTH are always allowed.
-        if verb == "AUTH" || verb == "HEALTH" {
+        // AUTH, HEALTH, and CONFIG are always allowed.
+        if verb == "AUTH" || verb == "HEALTH" || verb == "CONFIG" {
             return Ok(());
         }
 

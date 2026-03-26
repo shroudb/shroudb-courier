@@ -16,6 +16,15 @@ pub enum Command {
     /// Health check.
     Health,
 
+    /// Get a config value by key.
+    ConfigGet { key: String },
+
+    /// Set a config value.
+    ConfigSet { key: String, value: String },
+
+    /// List all config entries.
+    ConfigList,
+
     /// Authenticate the connection.
     Auth { token: String },
 
@@ -31,6 +40,9 @@ pub fn command_verb(cmd: &Command) -> &'static str {
         Command::TemplateInfo { .. } => "TEMPLATE_INFO",
         Command::Deliver { .. } => "DELIVER",
         Command::Health => "HEALTH",
+        Command::ConfigGet { .. } => "CONFIG",
+        Command::ConfigSet { .. } => "CONFIG",
+        Command::ConfigList => "CONFIG",
         Command::Auth { .. } => "AUTH",
         Command::Pipeline(_) => "PIPELINE",
     }
@@ -41,7 +53,11 @@ impl Command {
     pub fn is_read(&self) -> bool {
         matches!(
             self,
-            Command::TemplateList | Command::TemplateInfo { .. } | Command::Health
+            Command::TemplateList
+                | Command::TemplateInfo { .. }
+                | Command::Health
+                | Command::ConfigGet { .. }
+                | Command::ConfigList
         )
     }
 }

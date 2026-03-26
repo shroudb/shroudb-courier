@@ -9,6 +9,7 @@ license.workspace = true
 shroudb-courier-core.workspace = true
 shroudb-crypto.workspace = true
 
+dashmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

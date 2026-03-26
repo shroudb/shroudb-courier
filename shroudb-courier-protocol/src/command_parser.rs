@@ -19,6 +19,7 @@ pub fn parse_command(strings: Vec<String>) -> Result<Command, CommandError> {
         "TEMPLATE_INFO" => parse_template_info(args),
         "DELIVER" => parse_deliver(args),
         "HEALTH" => Ok(Command::Health),
+        "CONFIG" => parse_config(args),
         "AUTH" => parse_auth(args),
         "PIPELINE" => parse_pipeline(&strings),
         _ => Err(CommandError::BadArg {
@@ -39,6 +40,35 @@ fn parse_deliver(args: &[String]) -> Result<Command, CommandError> {
     Ok(Command::Deliver {
         json: args[0].clone(),
     })
+}
+
+fn parse_config(args: &[String]) -> Result<Command, CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::BadArg {
+            message: "CONFIG requires a subcommand (GET, SET, LIST)".into(),
+        });
+    }
+
+    let sub = args[0].to_ascii_uppercase();
+    match sub.as_str() {
+        "GET" => {
+            require_arg(&args[1..], "CONFIG GET", 1)?;
+            Ok(Command::ConfigGet {
+                key: args[1].clone(),
+            })
+        }
+        "SET" => {
+            require_arg(&args[1..], "CONFIG SET", 2)?;
+            Ok(Command::ConfigSet {
+                key: args[1].clone(),
+                value: args[2].clone(),
+            })
+        }
+        "LIST" => Ok(Command::ConfigList),
+        _ => Err(CommandError::BadArg {
+            message: format!("unknown CONFIG subcommand: {sub}"),
+        }),
+    }
 }
 
 fn parse_auth(args: &[String]) -> Result<Command, CommandError> {
@@ -138,6 +168,45 @@ mod tests {
             Command::Auth { token } => assert_eq!(token, "my-token"),
             _ => panic!("expected Auth"),
         }
+    }
+
+    #[test]
+    fn parse_config_get() {
+        let cmd = parse_command(s(&["CONFIG", "GET", "transit.addr"])).unwrap();
+        match cmd {
+            Command::ConfigGet { key } => assert_eq!(key, "transit.addr"),
+            _ => panic!("expected ConfigGet"),
+        }
+    }
+
+    #[test]
+    fn parse_config_set() {
+        let cmd = parse_command(s(&["CONFIG", "SET", "transit.addr", "localhost:9000"])).unwrap();
+        match cmd {
+            Command::ConfigSet { key, value } => {
+                assert_eq!(key, "transit.addr");
+                assert_eq!(value, "localhost:9000");
+            }
+            _ => panic!("expected ConfigSet"),
+        }
+    }
+
+    #[test]
+    fn parse_config_list() {
+        let cmd = parse_command(s(&["CONFIG", "LIST"])).unwrap();
+        assert!(matches!(cmd, Command::ConfigList));
+    }
+
+    #[test]
+    fn parse_config_missing_subcommand() {
+        let result = parse_command(s(&["CONFIG"]));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_config_unknown_subcommand() {
+        let result = parse_command(s(&["CONFIG", "BOGUS"]));
+        assert!(result.is_err());
     }
 
     #[test]
