@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "shroudb-courier-cli"
 path = "src/main.rs"
 
 [dependencies]
-shroudb-courier-client = { path = "../shroudb-courier-client" }
+shroudb-courier-client.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

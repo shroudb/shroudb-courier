@@ -14,15 +14,17 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
+publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-courier-core = { path = "shroudb-courier-core" }
-shroudb-courier-protocol = { path = "shroudb-courier-protocol" }
+shroudb-courier-core = { path = "shroudb-courier-core", version = "0.1.0", registry = "shroudb" }
+shroudb-courier-protocol = { path = "shroudb-courier-protocol", version = "0.1.0", registry = "shroudb" }
+shroudb-courier-client = { path = "shroudb-courier-client", version = "0.1.0", registry = "shroudb" }
 
-# Commons crates (shroudb/commons) — only crypto for SecretBytes/zeroize
-shroudb-crypto = { git = "https://github.com/shroudb/commons.git", tag = "v0.6.0" }
-shroudb-telemetry = { git = "https://github.com/shroudb/commons.git", tag = "v0.6.0" }
+# Commons crates (shroudb registry)
+shroudb-crypto = { version = "0.1.0", registry = "shroudb" }
+shroudb-telemetry = { version = "0.1.0", registry = "shroudb" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
