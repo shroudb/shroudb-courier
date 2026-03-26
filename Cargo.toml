@@ -1,0 +1,75 @@
+[workspace]
+resolver = "3"
+default-members = ["shroudb-courier-server"]
+members = [
+    "shroudb-courier-server",
+    "shroudb-courier-core",
+    "shroudb-courier-protocol",
+    "shroudb-courier-client",
+    "shroudb-courier-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal crates
+shroudb-courier-core = { path = "shroudb-courier-core" }
+shroudb-courier-protocol = { path = "shroudb-courier-protocol" }
+
+# Commons crates (shroudb/commons) — only crypto for SecretBytes/zeroize
+shroudb-crypto = { git = "https://github.com/shroudb/commons.git", tag = "v0.3.0" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+
+# Template engine
+tera = "1"
+
+# SMTP delivery
+lettre = { version = "0.11", features = ["tokio1-rustls-tls", "builder", "smtp-transport", "hostname"], default-features = false }
+
+# HTTP client for webhook/SendGrid
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Delivery IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Adapter trait
+async-trait = "0.1"
+
+# Zeroize for plaintext
+zeroize = "1"
+
+# Networking
+axum = "0.8"
+rustls = "0.23"
+rustls-pki-types = { version = "1", features = ["std"] }
+tokio-rustls = "0.26"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.18"
+
+# Utilities
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dashmap = "6"
+base64 = "0.22"
+hex = "0.4"
+libc = "0.2"
+notify = "7"
+tower-http = { version = "0.6", features = ["cors"] }
+rustyline = { version = "17", features = ["derive"] }
+rustls-native-certs = "0.8"

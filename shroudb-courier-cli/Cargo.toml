@@ -1,0 +1,18 @@
+[package]
+name = "shroudb-courier-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shroudb-courier-cli"
+path = "src/main.rs"
+
+[dependencies]
+shroudb-courier-client = { path = "../shroudb-courier-client" }
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+rustyline.workspace = true
+serde_json.workspace = true
