@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dashmap::DashMap;
-use metrics::{counter, histogram};
 use tokio::sync::RwLock;
 
 use shroudb_courier_core::adapter::AdapterRegistry;
@@ -105,14 +104,6 @@ impl CommandDispatcher {
             Ok(_) => "ok",
             Err(_) => "error",
         };
-
-        counter!("courier_commands_total", "command" => verb, "result" => result_label)
-            .increment(1);
-        histogram!("courier_command_duration_seconds", "command" => verb)
-            .record(duration.as_secs_f64());
-
-        let behavior = if is_read { "read" } else { "write" };
-        counter!("courier_commands_by_behavior_total", "behavior" => behavior).increment(1);
 
         // Audit log for write operations.
         if !is_read {
