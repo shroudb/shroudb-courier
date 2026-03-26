@@ -1,0 +1,176 @@
+# ShrouDB Courier Protocol Specification
+#
+# Machine-readable definition of the ShrouDB Courier protocol.
+# Used by shroudb-codegen to generate typed client libraries in any language.
+
+[protocol]
+name = "shroudb-courier"
+version = "0.1.0"
+description = "Secure notification delivery pipeline"
+default_port = 6999
+uri_schemes = ["shroudb-courier://", "shroudb-courier+tls://"]
+uri_format = "{scheme}[token@]host[:port]"
+
+[protocol.wire_format]
+type = "resp3"
+request_format = "array_of_bulk_strings"
+success_envelope = "map"
+error_envelope = "simple_error"
+success_status_field = "status"
+success_status_value = "OK"
+
+# ─── Error codes ──────────────────────────────────────────────────────────────
+
+[error_codes]
+
+[error_codes.DENIED]
+description = "Authentication required or insufficient permissions"
+http_equiv = 401
+
+[error_codes.NOTFOUND]
+description = "Template not found"
+http_equiv = 404
+
+[error_codes.BADARG]
+description = "Missing or invalid argument"
+http_equiv = 400
+
+[error_codes.DELIVERY_FAILED]
+description = "Notification delivery failed"
+http_equiv = 502
+
+[error_codes.TEMPLATE_ERROR]
+description = "Template rendering error"
+http_equiv = 422
+
+[error_codes.NOTREADY]
+description = "Server is starting up or shutting down"
+http_equiv = 503
+
+[error_codes.INTERNAL]
+description = "Unexpected server error"
+http_equiv = 500
+
+# ─── Shared types ─────────────────────────────────────────────────────────────
+
+[types]
+
+[types.template_name]
+description = "Template identifier"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.delivery_json]
+description = "JSON-encoded delivery request (channel, recipient, template, vars)"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.delivery_id]
+description = "Unique delivery identifier"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.channel]
+description = "Delivery channel (smtp, webhook, sendgrid)"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.recipient_ciphertext]
+description = "Transit-encrypted recipient address"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+[commands]
+
+[commands.deliver]
+verb = "DELIVER"
+description = "Deliver a notification (decrypts recipient, renders template, sends via adapter)"
+replica_behavior = "WriteOnly"
+params = [
+    { name = "json", type = "delivery_json", required = true, position = 1, description = "JSON-encoded delivery request" },
+]
+response = [
+    { name = "delivery_id", type = "delivery_id", description = "Unique delivery identifier" },
+    { name = "channel", type = "channel", description = "Channel used for delivery" },
+    { name = "status", type = "string", description = "Delivery status (sent, queued)" },
+]
+errors = [
+    { code = "BADARG", condition = "Invalid JSON or missing required fields" },
+    { code = "NOTFOUND", condition = "Referenced template not found" },
+    { code = "TEMPLATE_ERROR", condition = "Template rendering failed" },
+    { code = "DELIVERY_FAILED", condition = "Adapter delivery failed" },
+]
+
+[commands.template_reload]
+verb = "TEMPLATE_RELOAD"
+description = "Reload templates from disk"
+replica_behavior = "WriteOnly"
+params = []
+response = [
+    { name = "count", type = "integer", description = "Number of templates loaded" },
+]
+errors = [
+    { code = "INTERNAL", condition = "Failed to read or parse template files" },
+]
+
+[commands.template_list]
+verb = "TEMPLATE_LIST"
+description = "List all loaded templates"
+replica_behavior = "PureRead"
+params = []
+response = [
+    { name = "templates", type = "array", description = "List of template names" },
+]
+
+[commands.template_info]
+verb = "TEMPLATE_INFO"
+description = "Get information about a specific template"
+replica_behavior = "PureRead"
+params = [
+    { name = "name", type = "template_name", required = true, position = 1, description = "Template name" },
+]
+response = [
+    { name = "name", type = "template_name", description = "Template name" },
+    { name = "channels", type = "array", description = "Supported delivery channels" },
+    { name = "variables", type = "array", description = "Template variables" },
+    { name = "loaded_at", type = "string", description = "When the template was loaded (RFC 3339)" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Template does not exist" },
+]
+
+[commands.health]
+verb = "HEALTH"
+description = "Check server health"
+replica_behavior = "PureRead"
+simple_response = true
+params = []
+response = [
+    { name = "state", type = "string", description = "Server state (READY, STARTING, etc.)" },
+]
+
+[commands.auth]
+verb = "AUTH"
+description = "Authenticate the connection"
+replica_behavior = "PureRead"
+params = [
+    { name = "token", type = "string", required = true, position = 1, description = "Bearer token" },
+]
+response = [
+    { name = "status", type = "string", description = "OK on success" },
+]
+errors = [
+    { code = "DENIED", condition = "Invalid or expired token" },
+]
