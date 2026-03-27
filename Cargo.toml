@@ -10,6 +10,7 @@ members = [
 ]
 
 [workspace.package]
+description = "Secure notification delivery — SMTP, webhook, SendGrid, WebSocket adapters"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"

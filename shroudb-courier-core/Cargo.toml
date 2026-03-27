@@ -1,5 +1,6 @@
 [package]
 name = "shroudb-courier-core"
+description = "Core types for ShrouDB Courier — delivery adapters, templates, notification models"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
