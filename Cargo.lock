@@ -2686,7 +2686,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shroudb-courier-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2698,7 +2698,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rustls",
  "rustls-native-certs",
@@ -2712,7 +2712,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -2737,13 +2737,14 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dashmap",
  "serde",
  "serde_json",
  "shroudb-courier-core",
  "shroudb-crypto",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2752,7 +2753,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -2972,6 +2973,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.2",
+ "once_cell",
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

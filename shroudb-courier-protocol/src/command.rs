@@ -37,6 +37,10 @@ pub enum Command {
     /// Get total WebSocket connections.
     Connections,
 
+    /// Simple connectivity check — returns PONG.
+    Ping,
+    /// List all supported commands.
+    CommandList,
     /// Execute a batch of commands.
     Pipeline(Vec<Command>),
 }
@@ -56,6 +60,8 @@ pub fn command_verb(cmd: &Command) -> &'static str {
         Command::ChannelInfo { .. } => "CHANNEL_INFO",
         Command::ChannelList => "CHANNEL_LIST",
         Command::Connections => "CONNECTIONS",
+        Command::Ping => "PING",
+        Command::CommandList => "COMMAND",
         Command::Pipeline(_) => "PIPELINE",
     }
 }
@@ -73,6 +79,8 @@ impl Command {
                 | Command::ChannelInfo { .. }
                 | Command::ChannelList
                 | Command::Connections
+                | Command::Ping
+                | Command::CommandList
         )
     }
 }

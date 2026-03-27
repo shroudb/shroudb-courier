@@ -19,6 +19,8 @@ pub fn parse_command(strings: Vec<String>) -> Result<Command, CommandError> {
         "TEMPLATE_INFO" => parse_template_info(args),
         "DELIVER" => parse_deliver(args),
         "HEALTH" => Ok(Command::Health),
+        "PING" => Ok(Command::Ping),
+        "COMMAND" => parse_command_sub(args),
         "CONFIG" => parse_config(args),
         "AUTH" => parse_auth(args),
         "CHANNEL_INFO" => parse_channel_info(args),
@@ -43,6 +45,21 @@ fn parse_deliver(args: &[String]) -> Result<Command, CommandError> {
     Ok(Command::Deliver {
         json: args[0].clone(),
     })
+}
+
+fn parse_command_sub(args: &[String]) -> Result<Command, CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::BadArg {
+            message: "COMMAND requires a subcommand (LIST)".into(),
+        });
+    }
+    let sub = args[0].to_ascii_uppercase();
+    match sub.as_str() {
+        "LIST" => Ok(Command::CommandList),
+        other => Err(CommandError::BadArg {
+            message: format!("unknown COMMAND subcommand: {other}"),
+        }),
+    }
 }
 
 fn parse_config(args: &[String]) -> Result<Command, CommandError> {

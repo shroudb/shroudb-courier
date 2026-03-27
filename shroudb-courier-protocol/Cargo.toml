@@ -20,4 +20,5 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
