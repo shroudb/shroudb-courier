@@ -1,0 +1,19 @@
+[package]
+name = "shroudb-courier-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CLI tool for the Courier just-in-time decryption delivery engine"
+
+[[bin]]
+name = "shroudb-courier-cli"
+path = "src/main.rs"
+
+[dependencies]
+shroudb-courier-client = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

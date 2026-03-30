@@ -1,0 +1,127 @@
+[protocol]
+name = "courier"
+version = "1.0.0"
+description = "Just-in-time decryption delivery engine"
+default_tcp_port = 6999
+uri_scheme = "shroudb-courier"
+uri_scheme_tls = "shroudb-courier+tls"
+
+[wire]
+format = "resp3"
+request = "array_of_bulk_strings"
+success = "bulk_string_json"
+error = "simple_error"
+
+# --- Error codes ---
+
+[errors.NOTFOUND]
+description = "Channel not found"
+http_status = 404
+
+[errors.EXISTS]
+description = "Channel already exists"
+http_status = 409
+
+[errors.BADARG]
+description = "Invalid argument or malformed JSON"
+http_status = 400
+
+[errors.DENIED]
+description = "Access denied"
+http_status = 403
+
+[errors.AUTH_REQUIRED]
+description = "Authentication required"
+http_status = 401
+
+[errors.ADAPTER]
+description = "Delivery adapter failure"
+http_status = 502
+
+[errors.DECRYPT]
+description = "Cipher decryption failed"
+http_status = 500
+
+[errors.INTERNAL]
+description = "Unexpected internal error"
+http_status = 500
+
+# --- Commands ---
+
+[commands.AUTH]
+syntax = "AUTH <token>"
+description = "Authenticate the connection with a token"
+parameters = [
+    { name = "token", type = "string", required = true, description = "Authentication token" },
+]
+response = { status = "string" }
+
+[commands.CHANNEL_CREATE]
+syntax = "CHANNEL CREATE <name> <type> <config_json>"
+description = "Create a delivery channel"
+parameters = [
+    { name = "name", type = "channel_name", required = true, description = "Channel name" },
+    { name = "type", type = "channel_type", required = true, description = "Channel type (email, webhook)" },
+    { name = "config_json", type = "json_value", required = true, description = "Adapter configuration" },
+]
+response = { status = "string", name = "string", channel_type = "string" }
+
+[commands.CHANNEL_GET]
+syntax = "CHANNEL GET <name>"
+description = "Get channel configuration"
+parameters = [
+    { name = "name", type = "channel_name", required = true, description = "Channel name" },
+]
+response = { name = "string", channel_type = "string", enabled = "boolean", created_at = "integer" }
+
+[commands.CHANNEL_LIST]
+syntax = "CHANNEL LIST"
+description = "List all channels"
+response = { status = "string", count = "integer", channels = "array" }
+
+[commands.CHANNEL_DELETE]
+syntax = "CHANNEL DELETE <name>"
+description = "Delete a channel"
+parameters = [
+    { name = "name", type = "channel_name", required = true, description = "Channel name" },
+]
+response = { status = "string", name = "string" }
+
+[commands.DELIVER]
+syntax = "DELIVER <json>"
+description = "Decrypt recipient and deliver a message"
+parameters = [
+    { name = "json", type = "json_value", required = true, description = "Delivery request" },
+]
+response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer" }
+
+[commands.HEALTH]
+syntax = "HEALTH"
+description = "Server health check"
+response = { status = "string", channels = "integer" }
+
+[commands.PING]
+syntax = "PING"
+description = "Connectivity check"
+response = "PONG"
+
+[commands.COMMAND_LIST]
+syntax = "COMMAND LIST"
+description = "List available commands"
+response = { commands = "array", count = "integer" }
+
+# --- Types ---
+
+[types.channel_name]
+base = "string"
+pattern = "^[a-zA-Z0-9_-]{1,255}$"
+description = "Channel name: alphanumeric, hyphens, underscores"
+
+[types.channel_type]
+base = "string"
+enum = ["email", "webhook"]
+description = "Delivery channel type"
+
+[types.json_value]
+base = "string"
+description = "JSON-encoded object"

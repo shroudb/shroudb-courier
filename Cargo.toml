@@ -1,0 +1,68 @@
+[workspace]
+resolver = "3"
+default-members = ["shroudb-courier-server"]
+members = [
+    "shroudb-courier-core",
+    "shroudb-courier-engine",
+    "shroudb-courier-protocol",
+    "shroudb-courier-server",
+    "shroudb-courier-client",
+    "shroudb-courier-cli",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+publish = ["shroudb"]
+
+[workspace.dependencies]
+# Internal crates
+shroudb-courier-core = { path = "shroudb-courier-core", version = "1.0.0" }
+shroudb-courier-engine = { path = "shroudb-courier-engine", version = "1.0.0" }
+shroudb-courier-protocol = { path = "shroudb-courier-protocol", version = "1.0.0" }
+shroudb-courier-client = { path = "shroudb-courier-client", version = "1.0.0" }
+
+# ShrouDB commons (shroudb registry)
+shroudb-store = { version = "0.1.2", registry = "shroudb" }
+shroudb-storage = { version = "0.2.11", registry = "shroudb" }
+shroudb-acl = { version = "0.1.2", registry = "shroudb" }
+shroudb-crypto = { version = "0.1.0", registry = "shroudb" }
+shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Security
+zeroize = { version = "1", features = ["derive"] }
+
+# Utilities
+anyhow = "1"
+thiserror = "2"
+hex = "0.4"
+base64 = "0.22"
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }
+
+# Delivery adapters
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Cipher client (for recipient decryption)
+shroudb-cipher-client = { version = "1.0.0", registry = "shroudb" }
+
+# Testing
+tempfile = "3"

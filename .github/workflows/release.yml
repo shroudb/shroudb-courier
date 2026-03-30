@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    uses: shroudb/.github/.github/workflows/rust-release.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      product: "courier"
+      server_package: "shroudb-courier-server"
+      server_binary: "shroudb-courier"
+      cli_package: "shroudb-courier-cli"
+      cli_binary: "shroudb-courier-cli"
+      docker_server_target: "shroudb-courier"
+      docker_cli_target: "shroudb-courier-cli"
+      crates: "shroudb-courier-core,shroudb-courier-engine,shroudb-courier-protocol,shroudb-courier-client,shroudb-courier-server,shroudb-courier-cli"
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

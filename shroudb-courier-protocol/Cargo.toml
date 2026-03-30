@@ -1,0 +1,23 @@
+[package]
+name = "shroudb-courier-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "RESP3 command parsing and dispatch for the Courier delivery engine"
+
+[dependencies]
+shroudb-courier-core = { workspace = true }
+shroudb-courier-engine = { workspace = true }
+shroudb-store = { workspace = true }
+shroudb-acl = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+shroudb-storage = { workspace = true }
+shroudb-crypto = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+tempfile = { workspace = true }
