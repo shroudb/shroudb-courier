@@ -82,7 +82,7 @@ impl<S: Store> CourierEngine<S> {
         Ok(())
     }
 
-    pub fn channel_get(&self, name: &str) -> Result<Channel, CourierError> {
+    pub fn channel_get(&self, name: &str) -> Result<Arc<Channel>, CourierError> {
         self.channel_manager.get(name)
     }
 

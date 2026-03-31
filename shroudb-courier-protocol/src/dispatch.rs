@@ -119,7 +119,7 @@ async fn handle_channel_create<S: Store>(
 
 fn handle_channel_get<S: Store>(engine: &CourierEngine<S>, name: &str) -> CourierResponse {
     match engine.channel_get(name) {
-        Ok(ch) => match serde_json::to_value(&ch) {
+        Ok(ch) => match serde_json::to_value(&*ch) {
             Ok(v) => CourierResponse::ok(v),
             Err(e) => CourierResponse::error(format!("serialization error: {e}")),
         },

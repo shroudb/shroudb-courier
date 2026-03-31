@@ -11,7 +11,7 @@ const CHANNELS_NAMESPACE: &str = "courier.channels";
 
 pub struct ChannelManager<S: Store> {
     store: Arc<S>,
-    cache: DashMap<String, Channel>,
+    cache: DashMap<String, Arc<Channel>>,
 }
 
 impl<S: Store> ChannelManager<S> {
@@ -47,7 +47,7 @@ impl<S: Store> ChannelManager<S> {
                     .map_err(store_err)?;
                 let channel: Channel = serde_json::from_slice(&entry.value)
                     .map_err(|e| CourierError::Internal(format!("corrupt channel data: {e}")))?;
-                self.cache.insert(channel.name.clone(), channel);
+                self.cache.insert(channel.name.clone(), Arc::new(channel));
             }
 
             match page.cursor {
@@ -68,7 +68,7 @@ impl<S: Store> ChannelManager<S> {
             return Err(CourierError::ChannelExists(channel.name.clone()));
         }
 
-        self.cache.insert(channel.name.clone(), channel);
+        self.cache.insert(channel.name.clone(), Arc::new(channel));
         Ok(())
     }
 
@@ -82,10 +82,10 @@ impl<S: Store> ChannelManager<S> {
         Ok(())
     }
 
-    pub fn get(&self, name: &str) -> Result<Channel, CourierError> {
+    pub fn get(&self, name: &str) -> Result<Arc<Channel>, CourierError> {
         self.cache
             .get(name)
-            .map(|entry| entry.value().clone())
+            .map(|entry| Arc::clone(entry.value()))
             .ok_or_else(|| CourierError::ChannelNotFound(name.to_string()))
     }
 
