@@ -238,4 +238,64 @@ mod tests {
         let result = execute_delivery(&req, Some(&MockDecryptor), &MockAdapter).await;
         assert!(result.is_err());
     }
+
+    /// Decryptor that sleeps to simulate network latency.
+    /// Used to verify concurrent deliveries don't serialize.
+    struct SlowDecryptor;
+    impl Decryptor for SlowDecryptor {
+        fn decrypt<'a>(
+            &'a self,
+            ciphertext: &'a str,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<String, CourierError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                Ok(ciphertext
+                    .strip_prefix("enc:")
+                    .unwrap_or(ciphertext)
+                    .to_string())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_deliveries_do_not_serialize() {
+        let decryptor = std::sync::Arc::new(SlowDecryptor);
+        let adapter = std::sync::Arc::new(MockAdapter);
+
+        let start = std::time::Instant::now();
+        let mut handles = Vec::new();
+
+        for i in 0..5 {
+            let d = decryptor.clone();
+            let a = adapter.clone();
+            handles.push(tokio::spawn(async move {
+                let req = DeliveryRequest {
+                    channel: "webhook".into(),
+                    recipient: format!("enc:https://example.com/hook/{i}"),
+                    subject: None,
+                    body: Some("payload".into()),
+                    body_encrypted: None,
+                    content_type: None,
+                };
+                execute_delivery(&req, Some(d.as_ref()), a.as_ref())
+                    .await
+                    .unwrap()
+            }));
+        }
+
+        for h in handles {
+            let result = h.await.unwrap();
+            assert_eq!(result.receipt.status, DeliveryStatus::Delivered);
+        }
+
+        let elapsed = start.elapsed();
+        // 5 deliveries with 100ms decrypt each. If serialized: >= 500ms.
+        // If concurrent: ~100ms. Allow generous margin.
+        assert!(
+            elapsed.as_millis() < 350,
+            "deliveries appear to be serializing: {elapsed:?} for 5 concurrent deliveries \
+             with 100ms decrypt each (expected < 350ms)"
+        );
+    }
 }
