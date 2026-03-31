@@ -1,7 +1,10 @@
 use dashmap::DashMap;
+use shroudb_chronicle_core::event::{Engine as AuditEngine, Event, EventResult};
+use shroudb_chronicle_core::ops::ChronicleOps;
 use shroudb_courier_core::{Channel, ChannelType, CourierError, DeliveryReceipt, DeliveryRequest};
 use shroudb_store::Store;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::capabilities::{Decryptor, DeliveryAdapter};
 use crate::channel_manager::ChannelManager;
@@ -11,12 +14,14 @@ pub struct CourierEngine<S: Store> {
     channel_manager: ChannelManager<S>,
     decryptor: Option<Arc<dyn Decryptor>>,
     adapters: DashMap<ChannelType, Arc<dyn DeliveryAdapter>>,
+    chronicle: Option<Arc<dyn ChronicleOps>>,
 }
 
 impl<S: Store> CourierEngine<S> {
     pub async fn new(
         store: Arc<S>,
         decryptor: Option<Arc<dyn Decryptor>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CourierError> {
         let channel_manager = ChannelManager::new(store);
         channel_manager.init().await?;
@@ -25,7 +30,34 @@ impl<S: Store> CourierEngine<S> {
             channel_manager,
             decryptor,
             adapters: DashMap::new(),
+            chronicle,
         })
+    }
+
+    /// Emit an audit event to Chronicle. Warn-only on failure — Courier is
+    /// infrastructure and must not fail because auditing is unavailable.
+    async fn emit_audit_event(
+        &self,
+        operation: &str,
+        resource: &str,
+        result: EventResult,
+        actor: Option<&str>,
+        start: Instant,
+    ) {
+        let Some(chronicle) = &self.chronicle else {
+            return;
+        };
+        let mut event = Event::new(
+            AuditEngine::Courier,
+            operation.to_string(),
+            resource.to_string(),
+            result,
+            actor.unwrap_or("anonymous").to_string(),
+        );
+        event.duration_ms = start.elapsed().as_millis() as u64;
+        if let Err(e) = chronicle.record(event).await {
+            tracing::warn!(operation, resource, error = %e, "failed to emit audit event");
+        }
     }
 
     pub fn register_adapter(&self, channel_type: ChannelType, adapter: Arc<dyn DeliveryAdapter>) {
@@ -35,8 +67,17 @@ impl<S: Store> CourierEngine<S> {
     // --- Channel operations ---
 
     pub async fn channel_create(&self, channel: Channel) -> Result<(), CourierError> {
+        let start = Instant::now();
         self.channel_manager.create(channel.clone())?;
         self.channel_manager.save(&channel).await?;
+        self.emit_audit_event(
+            "CHANNEL_CREATE",
+            &channel.name,
+            EventResult::Ok,
+            None,
+            start,
+        )
+        .await;
         tracing::info!(name = %channel.name, channel_type = %channel.channel_type, "channel created");
         Ok(())
     }
@@ -50,7 +91,10 @@ impl<S: Store> CourierEngine<S> {
     }
 
     pub async fn channel_delete(&self, name: &str) -> Result<(), CourierError> {
+        let start = Instant::now();
         self.channel_manager.delete(name).await?;
+        self.emit_audit_event("CHANNEL_DELETE", name, EventResult::Ok, None, start)
+            .await;
         tracing::info!(name = %name, "channel deleted");
         Ok(())
     }
@@ -58,6 +102,7 @@ impl<S: Store> CourierEngine<S> {
     // --- Delivery ---
 
     pub async fn deliver(&self, request: DeliveryRequest) -> Result<DeliveryReceipt, CourierError> {
+        let start = Instant::now();
         let channel = self.channel_manager.get(&request.channel)?;
         if !channel.enabled {
             return Err(CourierError::InvalidArgument(format!(
@@ -75,6 +120,8 @@ impl<S: Store> CourierEngine<S> {
         let result =
             execute_delivery(&request, self.decryptor.as_deref(), adapter.as_ref()).await?;
 
+        self.emit_audit_event("DELIVER", &request.channel, EventResult::Ok, None, start)
+            .await;
         Ok(result.receipt)
     }
 
@@ -140,7 +187,7 @@ mod tests {
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)))
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None)
             .await
             .unwrap();
         engine.register_adapter(

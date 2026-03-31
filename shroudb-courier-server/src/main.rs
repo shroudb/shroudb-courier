@@ -113,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         };
 
     // Engine
-    let engine = CourierEngine::new(Arc::clone(&store), decryptor)
+    let engine = CourierEngine::new(Arc::clone(&store), decryptor, None)
         .await
         .context("failed to initialize courier engine")?;
     let engine = Arc::new(engine);
