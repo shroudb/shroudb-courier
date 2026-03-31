@@ -120,35 +120,26 @@ impl<S: Store> ChannelManager<S> {
 mod tests {
     use super::*;
     use shroudb_courier_core::{ChannelType, SmtpConfig};
-    use shroudb_storage::{EmbeddedStore, StorageEngine, StorageEngineConfig};
+    use shroudb_storage::{EmbeddedStore, MasterKeySource, StorageEngine, StorageEngineConfig};
 
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
+    /// Fixed-key source for persistence tests that reopen the same directory.
+    struct FixedTestKey;
+    impl MasterKeySource for FixedTestKey {
         fn source_name(&self) -> &str {
-            "ephemeral"
+            "fixed-test"
         }
-        fn load<'a>(
-            &'a self,
+        fn load(
+            &self,
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
                         Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
                     > + Send
-                    + 'a,
+                    + '_,
             >,
         > {
             Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
         }
-    }
-
-    async fn create_test_store() -> Arc<EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = StorageEngine::open(config, &EphemeralKey).await.unwrap();
-        Arc::new(EmbeddedStore::new(Arc::new(engine), "courier-test"))
     }
 
     fn test_channel(name: &str) -> Channel {
@@ -171,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_channel_crud() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
 
@@ -192,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_channel_duplicate_rejected() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
 
@@ -203,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_channel_invalid_name() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
 
@@ -219,7 +210,7 @@ mod tests {
             data_dir: dir.clone(),
             ..Default::default()
         };
-        let engine = StorageEngine::open(config, &EphemeralKey).await.unwrap();
+        let engine = StorageEngine::open(config, &FixedTestKey).await.unwrap();
         let store = Arc::new(EmbeddedStore::new(Arc::new(engine), "courier-test"));
 
         let mgr = ChannelManager::new(store);
@@ -233,7 +224,7 @@ mod tests {
             data_dir: dir,
             ..Default::default()
         };
-        let engine2 = StorageEngine::open(config2, &EphemeralKey).await.unwrap();
+        let engine2 = StorageEngine::open(config2, &FixedTestKey).await.unwrap();
         let store2 = Arc::new(EmbeddedStore::new(Arc::new(engine2), "courier-test"));
         let mgr2 = ChannelManager::new(store2);
         mgr2.init().await.unwrap();
@@ -244,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_if_absent() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
 
@@ -259,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_nonexistent() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
 

@@ -21,6 +21,6 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-shroudb-storage = { workspace = true }
+shroudb-storage = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["full", "test-util"] }
 tempfile = { workspace = true }

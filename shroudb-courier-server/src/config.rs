@@ -10,8 +10,6 @@ pub struct CourierServerConfig {
     #[serde(default)]
     pub store: StoreConfig,
     #[serde(default)]
-    pub engine: EngineConfig,
-    #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default)]
     pub cipher: Option<CipherConfig>,
@@ -72,9 +70,6 @@ fn default_data_dir() -> String {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub struct EngineConfig {}
-
-#[derive(Debug, Default, Deserialize)]
 pub struct AuthConfig {
     pub method: Option<String>,
     #[serde(default)]
@@ -127,7 +122,6 @@ pub fn load_config(path: Option<&str>) -> anyhow::Result<CourierServerConfig> {
         None => Ok(CourierServerConfig {
             server: ServerConfig::default(),
             store: StoreConfig::default(),
-            engine: EngineConfig::default(),
             auth: AuthConfig::default(),
             cipher: None,
             channels: HashMap::new(),

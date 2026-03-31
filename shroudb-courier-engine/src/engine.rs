@@ -7,9 +7,6 @@ use crate::capabilities::{Decryptor, DeliveryAdapter};
 use crate::channel_manager::ChannelManager;
 use crate::delivery::execute_delivery;
 
-#[derive(Default)]
-pub struct CourierConfig {}
-
 pub struct CourierEngine<S: Store> {
     channel_manager: ChannelManager<S>,
     decryptor: Option<Arc<dyn Decryptor>>,
@@ -19,7 +16,6 @@ pub struct CourierEngine<S: Store> {
 impl<S: Store> CourierEngine<S> {
     pub async fn new(
         store: Arc<S>,
-        _config: CourierConfig,
         decryptor: Option<Arc<dyn Decryptor>>,
     ) -> Result<Self, CourierError> {
         let channel_manager = ChannelManager::new(store);
@@ -93,27 +89,8 @@ impl<S: Store> CourierEngine<S> {
 mod tests {
     use super::*;
     use shroudb_courier_core::{DeliveryStatus, RenderedMessage, SmtpConfig, WebhookConfig};
-    use shroudb_storage::{EmbeddedStore, StorageEngine, StorageEngineConfig};
+    use shroudb_storage::EmbeddedStore;
     use std::pin::Pin;
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
 
     struct MockDecryptor;
     impl Decryptor for MockDecryptor {
@@ -162,20 +139,10 @@ mod tests {
     }
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let se = StorageEngine::open(config, &EphemeralKey).await.unwrap();
-        let store = Arc::new(EmbeddedStore::new(Arc::new(se), "courier-test"));
-        let engine = CourierEngine::new(
-            store,
-            CourierConfig::default(),
-            Some(Arc::new(MockDecryptor)),
-        )
-        .await
-        .unwrap();
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)))
+            .await
+            .unwrap();
         engine.register_adapter(
             ChannelType::Email,
             Arc::new(MockAdapter {

@@ -168,29 +168,10 @@ async fn handle_deliver<S: Store>(
 mod tests {
     use super::*;
     use shroudb_courier_core::{CourierError, DeliveryReceipt, DeliveryStatus, RenderedMessage};
-    use shroudb_courier_engine::{CourierConfig, Decryptor, DeliveryAdapter};
-    use shroudb_storage::{EmbeddedStore, StorageEngine, StorageEngineConfig};
+    use shroudb_courier_engine::{Decryptor, DeliveryAdapter};
+    use shroudb_storage::EmbeddedStore;
     use std::pin::Pin;
     use std::sync::Arc;
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
 
     struct MockDecryptor;
     impl Decryptor for MockDecryptor {
@@ -236,20 +217,10 @@ mod tests {
     }
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let se = StorageEngine::open(config, &EphemeralKey).await.unwrap();
-        let store = Arc::new(EmbeddedStore::new(Arc::new(se), "courier-test"));
-        let engine = CourierEngine::new(
-            store,
-            CourierConfig::default(),
-            Some(Arc::new(MockDecryptor)),
-        )
-        .await
-        .unwrap();
+        let store = shroudb_storage::test_util::create_test_store("courier-test").await;
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)))
+            .await
+            .unwrap();
         engine.register_adapter(
             shroudb_courier_core::ChannelType::Email,
             Arc::new(MockAdapter),

@@ -8,9 +8,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::Parser;
 use shroudb_courier_core::{Channel, ChannelType};
-use shroudb_courier_engine::{CourierConfig, CourierEngine};
+use shroudb_courier_engine::CourierEngine;
 use shroudb_storage::{
-    ChainedMasterKeySource, EnvMasterKey, FileMasterKey, MasterKeySource, StorageEngineConfig,
+    ChainedMasterKeySource, EnvMasterKey, EphemeralKey, FileMasterKey, MasterKeySource,
+    StorageEngineConfig,
 };
 use tokio::net::TcpListener;
 
@@ -33,55 +34,6 @@ struct Cli {
 
     #[arg(long, env = "COURIER_LOG_LEVEL", default_value = "info")]
     log_level: String,
-}
-
-fn disable_core_dumps() {
-    #[cfg(target_os = "linux")]
-    {
-        if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } != 0 {
-            tracing::warn!("failed to disable core dumps via prctl");
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let zero = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
-        if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &zero) } != 0 {
-            tracing::warn!("failed to disable core dumps via setrlimit");
-        }
-    }
-}
-
-/// Ephemeral master key for dev mode (data won't survive restarts).
-struct EphemeralKey;
-
-impl MasterKeySource for EphemeralKey {
-    fn source_name(&self) -> &str {
-        "ephemeral"
-    }
-
-    fn load<'a>(
-        &'a self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                > + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async {
-            tracing::warn!("using ephemeral master key — data will not survive restart");
-            let key = ring::rand::SystemRandom::new();
-            let mut bytes = vec![0u8; 32];
-            ring::rand::SecureRandom::fill(&key, &mut bytes)
-                .map_err(|_| shroudb_storage::StorageError::Internal("RNG failed".into()))?;
-            Ok(shroudb_crypto::SecretBytes::new(bytes))
-        })
-    }
 }
 
 #[tokio::main]
@@ -115,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .json()
         .init();
 
-    disable_core_dumps();
+    shroudb_crypto::disable_core_dumps();
 
     // Master key
     let key_source: Box<dyn MasterKeySource> = Box::new(ChainedMasterKeySource::new(vec![
@@ -161,8 +113,7 @@ async fn main() -> anyhow::Result<()> {
         };
 
     // Engine
-    let _engine_config = &cfg.engine; // reserved for future engine-specific settings
-    let engine = CourierEngine::new(Arc::clone(&store), CourierConfig::default(), decryptor)
+    let engine = CourierEngine::new(Arc::clone(&store), decryptor)
         .await
         .context("failed to initialize courier engine")?;
     let engine = Arc::new(engine);
