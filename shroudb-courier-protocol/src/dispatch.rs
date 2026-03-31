@@ -332,4 +332,82 @@ mod tests {
         let resp = dispatch(&engine, get, None).await;
         assert!(!resp.is_ok());
     }
+
+    // ── ACL tests ─────────────────────────────────────────────────────
+
+    fn read_only_context() -> AuthContext {
+        use shroudb_acl::{Grant, Scope};
+        AuthContext::tenant(
+            "tenant-a",
+            "read-user",
+            vec![Grant {
+                namespace: "courier.test-hook.*".into(),
+                scopes: vec![Scope::Read],
+            }],
+            None,
+        )
+    }
+
+    fn write_context() -> AuthContext {
+        use shroudb_acl::{Grant, Scope};
+        AuthContext::tenant(
+            "tenant-a",
+            "write-user",
+            vec![Grant {
+                namespace: "courier.test-hook.*".into(),
+                scopes: vec![Scope::Read, Scope::Write],
+            }],
+            None,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_unauthorized_write_rejected() {
+        let engine = create_engine().await;
+        let ctx = read_only_context();
+
+        // DELIVER requires Write scope on courier.<channel>.*
+        let cmd = CourierCommand::Deliver {
+            request_json: r#"{"channel":"test-hook","recipient":"enc:x","body":"test"}"#.into(),
+        };
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(
+            !resp.is_ok(),
+            "read-only context should not be able to deliver"
+        );
+
+        match resp {
+            CourierResponse::Error(msg) => assert!(
+                msg.contains("access denied"),
+                "error should mention access denied, got: {msg}"
+            ),
+            _ => panic!("expected error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unauthorized_admin_rejected() {
+        let engine = create_engine().await;
+        let ctx = write_context();
+
+        // CHANNEL CREATE requires Admin scope
+        let cmd = CourierCommand::ChannelCreate {
+            name: "new-channel".into(),
+            channel_type: "webhook".into(),
+            config_json: "{}".into(),
+        };
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(
+            !resp.is_ok(),
+            "non-admin context should not be able to create channels"
+        );
+
+        match resp {
+            CourierResponse::Error(msg) => assert!(
+                msg.contains("access denied"),
+                "error should mention access denied, got: {msg}"
+            ),
+            _ => panic!("expected error response"),
+        }
+    }
 }
