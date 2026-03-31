@@ -11,6 +11,7 @@ description = "Domain types for the Courier just-in-time decryption delivery eng
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -46,6 +47,15 @@ pub struct RenderedMessage {
     pub subject: Option<String>,
     pub body: String,
     pub content_type: ContentType,
+}
+
+impl Drop for RenderedMessage {
+    fn drop(&mut self) {
+        self.body.zeroize();
+        if let Some(ref mut s) = self.subject {
+            s.zeroize();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
