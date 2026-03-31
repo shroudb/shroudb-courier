@@ -163,4 +163,97 @@ mod tests {
         assert_eq!(ContentType::Plain.to_string(), "plain");
         assert_eq!(ContentType::Html.to_string(), "html");
     }
+
+    #[test]
+    fn test_content_type_serde_roundtrip() {
+        for ct in [ContentType::Plain, ContentType::Html] {
+            let json = serde_json::to_string(&ct).unwrap();
+            let parsed: ContentType = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, ct);
+        }
+    }
+
+    #[test]
+    fn test_delivery_status_serde_roundtrip() {
+        for status in [DeliveryStatus::Delivered, DeliveryStatus::Failed] {
+            let json = serde_json::to_string(&status).unwrap();
+            let parsed: DeliveryStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn test_delivery_status_json_values() {
+        assert_eq!(
+            serde_json::to_string(&DeliveryStatus::Delivered).unwrap(),
+            "\"delivered\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DeliveryStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+    }
+
+    #[test]
+    fn test_delivery_receipt_failed_with_error() {
+        let receipt = DeliveryReceipt {
+            delivery_id: "fail-001".into(),
+            channel: "email".into(),
+            status: DeliveryStatus::Failed,
+            delivered_at: 2000,
+            error: Some("SMTP connection refused".into()),
+        };
+        let json = serde_json::to_string(&receipt).unwrap();
+        let parsed: DeliveryReceipt = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.status, DeliveryStatus::Failed);
+        assert_eq!(parsed.error.as_deref(), Some("SMTP connection refused"));
+    }
+
+    #[test]
+    fn test_delivery_request_with_content_type() {
+        let req = DeliveryRequest {
+            channel: "email".into(),
+            recipient: "user@example.com".into(),
+            subject: Some("Alert".into()),
+            body: Some("<h1>Alert</h1>".into()),
+            body_encrypted: None,
+            content_type: Some(ContentType::Html),
+        };
+        assert!(req.validate().is_ok());
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: DeliveryRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.content_type, Some(ContentType::Html));
+    }
+
+    #[test]
+    fn test_delivery_request_serde_roundtrip() {
+        let req = DeliveryRequest {
+            channel: "webhook".into(),
+            recipient: "https://example.com/hook".into(),
+            subject: None,
+            body: Some(r#"{"event":"test"}"#.into()),
+            body_encrypted: None,
+            content_type: Some(ContentType::Plain),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: DeliveryRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.channel, "webhook");
+        assert_eq!(parsed.recipient, "https://example.com/hook");
+        assert!(parsed.subject.is_none());
+        assert_eq!(parsed.body.as_deref(), Some(r#"{"event":"test"}"#));
+    }
+
+    #[test]
+    fn test_rendered_message_serde() {
+        let msg = RenderedMessage {
+            subject: Some("Test Subject".into()),
+            body: "Hello, world!".into(),
+            content_type: ContentType::Plain,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: RenderedMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.subject.as_deref(), Some("Test Subject"));
+        assert_eq!(parsed.body, "Hello, world!");
+        assert_eq!(parsed.content_type, ContentType::Plain);
+    }
 }

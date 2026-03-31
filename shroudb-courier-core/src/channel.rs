@@ -134,4 +134,81 @@ mod tests {
         assert_eq!(deserialized.channel_type, ChannelType::Email);
         assert!(deserialized.smtp.is_some());
     }
+
+    #[test]
+    fn test_validate_name_boundary_255() {
+        let name_255 = "a".repeat(255);
+        assert!(validate_name(&name_255).is_ok());
+        let name_256 = "a".repeat(256);
+        assert!(validate_name(&name_256).is_err());
+    }
+
+    #[test]
+    fn test_validate_name_special_chars() {
+        assert!(validate_name("has@sign").is_err());
+        assert!(validate_name("has!bang").is_err());
+        assert!(validate_name("has:colon").is_err());
+        assert!(validate_name("has#hash").is_err());
+    }
+
+    #[test]
+    fn test_channel_type_serde_roundtrip() {
+        for ct in [ChannelType::Email, ChannelType::Webhook] {
+            let json = serde_json::to_string(&ct).unwrap();
+            let parsed: ChannelType = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, ct);
+        }
+    }
+
+    #[test]
+    fn test_channel_type_display_parse_roundtrip() {
+        for ct in [ChannelType::Email, ChannelType::Webhook] {
+            let display = ct.to_string();
+            let parsed: ChannelType = display.parse().unwrap();
+            assert_eq!(parsed, ct);
+        }
+    }
+
+    #[test]
+    fn test_webhook_channel_serialization() {
+        let channel = Channel {
+            name: "alerts-webhook".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: Some("POST".into()),
+                default_headers: Some(
+                    [("Content-Type".into(), "application/json".into())]
+                        .into_iter()
+                        .collect(),
+                ),
+                timeout_secs: Some(30),
+            }),
+            enabled: true,
+            created_at: 2000,
+        };
+        let json = serde_json::to_string(&channel).unwrap();
+        let deserialized: Channel = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "alerts-webhook");
+        assert_eq!(deserialized.channel_type, ChannelType::Webhook);
+        assert!(deserialized.webhook.is_some());
+        let wh = deserialized.webhook.unwrap();
+        assert_eq!(wh.default_method.as_deref(), Some("POST"));
+        assert_eq!(wh.timeout_secs, Some(30));
+    }
+
+    #[test]
+    fn test_channel_disabled() {
+        let channel = Channel {
+            name: "disabled-channel".into(),
+            channel_type: ChannelType::Email,
+            smtp: None,
+            webhook: None,
+            enabled: false,
+            created_at: 0,
+        };
+        let json = serde_json::to_string(&channel).unwrap();
+        let deserialized: Channel = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.enabled);
+    }
 }
