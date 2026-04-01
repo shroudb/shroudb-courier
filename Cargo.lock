@@ -65,7 +65,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -76,7 +76,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -483,7 +483,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1122,7 +1122,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1621,7 +1621,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1808,9 +1808,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.2.7"
+version = "1.2.8"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "fe7d48fb2340af779aa1dcfc64f15db8de863c8b1c3ec6cf3431006ad819832d"
+checksum = "6c62f139eb238950ad62f88e95f95ccec2dbe8fdf0a9a70a3d28e7cd3a207691"
 dependencies = [
  "serde",
  "serde_json",
@@ -1820,9 +1820,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-client"
-version = "1.4.4"
+version = "1.4.5"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "c62c166f0571936297bd74ccd250cb79ea5a91185b03aaeaf4c26a17798d32c0"
+checksum = "9208a6bf57556bac0397e9e1486a76460761517758b4dcdfc62e51bc09f20987"
 dependencies = [
  "serde",
  "serde_json",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-cli"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-client"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-engine"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "dashmap",
  "serde",
@@ -1895,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-protocol"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1911,7 +1911,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-server"
-version = "1.3.6"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2002,9 +2002,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-storage"
-version = "0.2.13"
+version = "0.2.14"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "4c82f51793de297293a6aa0f47426deae30d12f9e804920e0adc125722be53a1"
+checksum = "c77c1552528c8370bfcef78130bbdd3fbd29d94fb329daff4948c0043e46c16c"
 dependencies = [
  "crc32fast",
  "dashmap",
@@ -2088,7 +2088,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2169,7 +2169,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
