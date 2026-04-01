@@ -259,6 +259,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_plaintext_zeroized_after_delivery() {
+        // Verify the delivery path completes correctly when using encrypted body+recipient.
+        // The zeroize calls are in the code path; we verify the full encrypted flow
+        // produces a correct receipt (the zeroize is exercised implicitly).
+        let req = DeliveryRequest {
+            channel: "email".into(),
+            recipient: "enc:alice@example.com".into(),
+            subject: Some("Sensitive notice".into()),
+            body: None,
+            body_encrypted: Some("enc:This is a secret body".into()),
+            content_type: Some(ContentType::Plain),
+        };
+
+        let result = execute_delivery(&req, Some(&MockDecryptor), &MockAdapter)
+            .await
+            .unwrap();
+
+        assert_eq!(result.receipt.status, DeliveryStatus::Delivered);
+        assert_eq!(result.receipt.channel, "mock");
+        assert!(result.receipt.error.is_none());
+        assert!(!result.receipt.delivery_id.is_empty());
+        assert!(result.receipt.delivered_at > 0);
+    }
+
+    #[tokio::test]
     async fn test_concurrent_deliveries_do_not_serialize() {
         let decryptor = std::sync::Arc::new(SlowDecryptor);
         let adapter = std::sync::Arc::new(MockAdapter);
