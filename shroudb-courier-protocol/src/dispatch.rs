@@ -10,11 +10,8 @@ pub async fn dispatch<S: Store>(
     cmd: CourierCommand,
     auth_context: Option<&AuthContext>,
 ) -> CourierResponse {
-    let requirement = cmd.acl_requirement();
-    if let Some(ctx) = auth_context
-        && let Err(e) = ctx.check(&requirement)
-    {
-        return CourierResponse::error(format!("access denied: {e}"));
+    if let Err(e) = shroudb_acl::check_dispatch_acl(auth_context, &cmd.acl_requirement()) {
+        return CourierResponse::error(e);
     }
 
     match cmd {
