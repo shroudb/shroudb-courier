@@ -9,10 +9,6 @@ use anyhow::Context;
 use clap::Parser;
 use shroudb_courier_core::{Channel, ChannelType};
 use shroudb_courier_engine::CourierEngine;
-use shroudb_storage::{
-    ChainedMasterKeySource, EnvMasterKey, EphemeralKey, FileMasterKey, MasterKeySource,
-    StorageEngineConfig,
-};
 use tokio::net::TcpListener;
 
 use crate::config::{build_token_validator, load_config};
@@ -59,43 +55,15 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Logging
-    let filter = tracing_subscriber::EnvFilter::try_new(&cfg.server.log_level)
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .json()
-        .init();
-
-    shroudb_crypto::disable_core_dumps();
-
-    // Master key
-    let key_source: Box<dyn MasterKeySource> = Box::new(ChainedMasterKeySource::new(vec![
-        Box::new(EnvMasterKey::new()),
-        Box::new(FileMasterKey::new()),
-        Box::new(EphemeralKey),
-    ]));
-
-    let key_mode = if std::env::var("SHROUDB_MASTER_KEY").is_ok()
-        || std::env::var("SHROUDB_MASTER_KEY_FILE").is_ok()
-    {
-        "configured"
-    } else {
-        "ephemeral (dev mode)"
-    };
+    // Bootstrap: logging + core dumps + key source
+    let key_source = shroudb_server_bootstrap::bootstrap(&cfg.server.log_level);
 
     // Storage
-    let storage_config = StorageEngineConfig {
-        data_dir: std::path::PathBuf::from(&cfg.store.data_dir),
-        ..Default::default()
-    };
-    let storage_engine = shroudb_storage::StorageEngine::open(storage_config, key_source.as_ref())
+    let data_dir = std::path::PathBuf::from(&cfg.store.data_dir);
+    let storage = shroudb_server_bootstrap::open_storage(&data_dir, key_source.as_ref())
         .await
         .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(
-        Arc::new(storage_engine),
-        "courier",
-    ));
+    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "courier"));
 
     // Cipher decryptor
     let decryptor: Option<Arc<dyn shroudb_courier_engine::Decryptor>> =
@@ -173,7 +141,14 @@ async fn main() -> anyhow::Result<()> {
         tcp::run_tcp(listener, tcp_engine, tcp_tv, shutdown_rx).await;
     });
 
-    // Banner
+    // Banner (Courier has extra cipher line)
+    let key_mode = if std::env::var("SHROUDB_MASTER_KEY").is_ok()
+        || std::env::var("SHROUDB_MASTER_KEY_FILE").is_ok()
+    {
+        "configured"
+    } else {
+        "ephemeral (dev mode)"
+    };
     eprintln!("Courier v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("├─ tcp:     {tcp_bind}");
     eprintln!("├─ data:    {}", cfg.store.data_dir);
@@ -188,10 +163,8 @@ async fn main() -> anyhow::Result<()> {
     eprintln!();
     eprintln!("Ready.");
 
-    // Wait for shutdown signal
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("shutdown signal received");
-    let _ = shutdown_tx.send(true);
+    // Wait for shutdown
+    shroudb_server_bootstrap::wait_for_shutdown(shutdown_tx).await?;
     let _ = tcp_handle.await;
 
     Ok(())
