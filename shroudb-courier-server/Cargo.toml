@@ -19,6 +19,7 @@ shroudb-store = { workspace = true }
 shroudb-storage = { workspace = true }
 shroudb-acl = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
+shroudb-server-tcp = { workspace = true }
 shroudb-cipher-client = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
 tokio = { workspace = true }

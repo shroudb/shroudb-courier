@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_chronicle_core::event::{Engine as AuditEngine, Event, EventResult};
 use shroudb_chronicle_core::ops::ChronicleOps;
 use shroudb_courier_core::{Channel, ChannelType, CourierError, DeliveryReceipt, DeliveryRequest};
@@ -14,6 +15,7 @@ pub struct CourierEngine<S: Store> {
     channel_manager: ChannelManager<S>,
     decryptor: Option<Arc<dyn Decryptor>>,
     adapters: DashMap<ChannelType, Arc<dyn DeliveryAdapter>>,
+    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
     chronicle: Option<Arc<dyn ChronicleOps>>,
 }
 
@@ -21,6 +23,7 @@ impl<S: Store> CourierEngine<S> {
     pub async fn new(
         store: Arc<S>,
         decryptor: Option<Arc<dyn Decryptor>>,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
         chronicle: Option<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CourierError> {
         let channel_manager = ChannelManager::new(store);
@@ -30,8 +33,45 @@ impl<S: Store> CourierEngine<S> {
             channel_manager,
             decryptor,
             adapters: DashMap::new(),
+            policy_evaluator,
             chronicle,
         })
+    }
+
+    async fn check_policy(
+        &self,
+        resource_id: &str,
+        action: &str,
+        actor: Option<&str>,
+    ) -> Result<(), CourierError> {
+        let Some(evaluator) = &self.policy_evaluator else {
+            return Ok(());
+        };
+        let request = PolicyRequest {
+            principal: PolicyPrincipal {
+                id: actor.unwrap_or("").to_string(),
+                roles: vec![],
+                claims: Default::default(),
+            },
+            resource: PolicyResource {
+                id: resource_id.to_string(),
+                resource_type: "channel".to_string(),
+                attributes: Default::default(),
+            },
+            action: action.to_string(),
+        };
+        let decision = evaluator
+            .evaluate(&request)
+            .await
+            .map_err(|e| CourierError::Internal(format!("policy evaluation: {e}")))?;
+        if decision.effect == PolicyEffect::Deny {
+            return Err(CourierError::PolicyDenied {
+                action: action.to_string(),
+                resource: resource_id.to_string(),
+                policy: decision.matched_policy.unwrap_or_default(),
+            });
+        }
+        Ok(())
     }
 
     /// Emit an audit event to Chronicle. If chronicle is not configured, this
@@ -71,6 +111,8 @@ impl<S: Store> CourierEngine<S> {
 
     pub async fn channel_create(&self, channel: Channel) -> Result<(), CourierError> {
         let start = Instant::now();
+        self.check_policy(&channel.name, "channel_create", None)
+            .await?;
         self.channel_manager.create(channel.clone())?;
         self.channel_manager.save(&channel).await?;
         self.emit_audit_event(
@@ -95,6 +137,7 @@ impl<S: Store> CourierEngine<S> {
 
     pub async fn channel_delete(&self, name: &str) -> Result<(), CourierError> {
         let start = Instant::now();
+        self.check_policy(name, "channel_delete", None).await?;
         self.channel_manager.delete(name).await?;
         self.emit_audit_event("CHANNEL_DELETE", name, EventResult::Ok, None, start)
             .await?;
@@ -106,6 +149,7 @@ impl<S: Store> CourierEngine<S> {
 
     pub async fn deliver(&self, request: DeliveryRequest) -> Result<DeliveryReceipt, CourierError> {
         let start = Instant::now();
+        self.check_policy(&request.channel, "deliver", None).await?;
         let channel = self.channel_manager.get(&request.channel)?;
         if !channel.enabled {
             return Err(CourierError::InvalidArgument(format!(
@@ -221,7 +265,7 @@ mod tests {
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None)
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
             .await
             .unwrap();
         engine.register_adapter(
@@ -432,5 +476,60 @@ mod tests {
 
         let receipt = engine.deliver(req).await.unwrap();
         assert_eq!(receipt.status, DeliveryStatus::Delivered);
+    }
+
+    #[tokio::test]
+    async fn test_policy_denied_blocks_channel_create() {
+        use shroudb_acl::{
+            PolicyDecision, PolicyEffect, PolicyEvaluator, PolicyRequest as AclPolicyRequest,
+            error::AclError,
+        };
+        use std::pin::Pin;
+
+        struct DenyAll;
+        impl PolicyEvaluator for DenyAll {
+            fn evaluate(
+                &self,
+                _request: &AclPolicyRequest,
+            ) -> Pin<
+                Box<dyn std::future::Future<Output = Result<PolicyDecision, AclError>> + Send + '_>,
+            > {
+                Box::pin(async {
+                    Ok(PolicyDecision {
+                        effect: PolicyEffect::Deny,
+                        matched_policy: Some("deny-all".to_string()),
+                        token: None,
+                        cache_until: None,
+                    })
+                })
+            }
+        }
+
+        let store = shroudb_storage::test_util::create_test_store("courier-policy-test").await;
+        let engine = CourierEngine::new(
+            store,
+            Some(Arc::new(MockDecryptor)),
+            Some(Arc::new(DenyAll)),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let ch = Channel {
+            name: "blocked".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: None,
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        let err = engine.channel_create(ch).await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("policy denied"),
+            "expected policy denied error, got: {msg}"
+        );
     }
 }

@@ -1,6 +1,7 @@
 pub mod channel;
 pub mod delivery;
 pub mod error;
+pub mod ops;
 
 pub use channel::{Channel, ChannelType, SmtpConfig, WebhookConfig};
 pub use delivery::{

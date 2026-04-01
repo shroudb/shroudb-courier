@@ -240,7 +240,7 @@ mod tests {
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None)
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
             .await
             .unwrap();
         engine.register_adapter(

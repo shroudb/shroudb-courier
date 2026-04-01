@@ -23,6 +23,13 @@ pub enum CourierError {
     #[error("adapter not configured for channel type: {0}")]
     AdapterNotConfigured(String),
 
+    #[error("policy denied: {action} on {resource} (policy: {policy})")]
+    PolicyDenied {
+        action: String,
+        resource: String,
+        policy: String,
+    },
+
     #[error("store error: {0}")]
     Store(String),
 
