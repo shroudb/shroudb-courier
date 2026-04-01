@@ -53,6 +53,10 @@ pub struct Channel {
     pub webhook: Option<WebhookConfig>,
     pub enabled: bool,
     pub created_at: u64,
+    /// Default recipient for event notifications (e.g. rotation/expiry alerts).
+    /// When set, `notify_event` uses this instead of requiring a per-request recipient.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_recipient: Option<String>,
 }
 
 pub fn validate_name(name: &str) -> Result<(), String> {
@@ -127,6 +131,7 @@ mod tests {
             webhook: None,
             enabled: true,
             created_at: 1000,
+            default_recipient: None,
         };
         let json = serde_json::to_string(&channel).unwrap();
         let deserialized: Channel = serde_json::from_str(&json).unwrap();
@@ -186,6 +191,7 @@ mod tests {
             }),
             enabled: true,
             created_at: 2000,
+            default_recipient: None,
         };
         let json = serde_json::to_string(&channel).unwrap();
         let deserialized: Channel = serde_json::from_str(&json).unwrap();
@@ -206,6 +212,7 @@ mod tests {
             webhook: None,
             enabled: false,
             created_at: 0,
+            default_recipient: None,
         };
         let json = serde_json::to_string(&channel).unwrap();
         let deserialized: Channel = serde_json::from_str(&json).unwrap();

@@ -157,6 +157,7 @@ mod tests {
             webhook: None,
             enabled: true,
             created_at: 1000,
+            default_recipient: None,
         }
     }
 

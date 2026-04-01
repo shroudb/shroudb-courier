@@ -34,6 +34,12 @@ pub async fn dispatch<S: Store>(
 
         CourierCommand::ChannelDelete { name } => handle_channel_delete(engine, &name).await,
 
+        CourierCommand::NotifyEvent {
+            channel,
+            subject,
+            body,
+        } => handle_notify_event(engine, &channel, &subject, &body).await,
+
         CourierCommand::Deliver { request_json } => handle_deliver(engine, &request_json).await,
 
         CourierCommand::Health => {
@@ -49,9 +55,9 @@ pub async fn dispatch<S: Store>(
         CourierCommand::CommandList => CourierResponse::ok(serde_json::json!({
             "commands": [
                 "AUTH", "CHANNEL CREATE", "CHANNEL GET", "CHANNEL LIST", "CHANNEL DELETE",
-                "DELIVER", "HEALTH", "PING", "COMMAND LIST"
+                "DELIVER", "NOTIFY_EVENT", "HEALTH", "PING", "COMMAND LIST"
             ],
-            "count": 9
+            "count": 10
         })),
     }
 }
@@ -105,6 +111,7 @@ async fn handle_channel_create<S: Store>(
         webhook,
         enabled: true,
         created_at: now,
+        default_recipient: None,
     };
 
     match engine.channel_create(channel).await {
@@ -142,6 +149,21 @@ async fn handle_channel_delete<S: Store>(engine: &CourierEngine<S>, name: &str) 
             "status": "ok",
             "name": name,
         })),
+        Err(e) => CourierResponse::error(e.to_string()),
+    }
+}
+
+async fn handle_notify_event<S: Store>(
+    engine: &CourierEngine<S>,
+    channel: &str,
+    subject: &str,
+    body: &str,
+) -> CourierResponse {
+    match engine.notify_event(channel, subject, body).await {
+        Ok(receipt) => match serde_json::to_value(&receipt) {
+            Ok(v) => CourierResponse::ok(v),
+            Err(e) => CourierResponse::error(format!("serialization error: {e}")),
+        },
         Err(e) => CourierResponse::error(e.to_string()),
     }
 }
@@ -252,7 +274,7 @@ mod tests {
         let resp = dispatch(&engine, CourierCommand::CommandList, None).await;
         assert!(resp.is_ok());
         if let CourierResponse::Ok(v) = resp {
-            assert_eq!(v["count"], 9);
+            assert_eq!(v["count"], 10);
         }
     }
 
@@ -309,6 +331,69 @@ mod tests {
         if let CourierResponse::Ok(v) = resp {
             assert_eq!(v["status"], "delivered");
         }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_notify_event() {
+        let engine = create_engine().await;
+
+        // Create a webhook channel with a default_recipient
+        let create_ch = CourierCommand::ChannelCreate {
+            name: "rotation-alerts".into(),
+            channel_type: "webhook".into(),
+            config_json: "{}".into(),
+        };
+        dispatch(&engine, create_ch, None).await;
+
+        // Manually set default_recipient by creating via engine directly
+        // since CHANNEL CREATE doesn't expose default_recipient yet.
+        // We'll delete and re-create through the engine.
+        engine.channel_delete("rotation-alerts").await.unwrap();
+        let ch = shroudb_courier_core::Channel {
+            name: "rotation-alerts".into(),
+            channel_type: shroudb_courier_core::ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(shroudb_courier_core::WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: Some("https://ops.example.com/alerts".into()),
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let cmd = CourierCommand::NotifyEvent {
+            channel: "rotation-alerts".into(),
+            subject: "Cert expiry warning".into(),
+            body: "Certificate 'api-tls' expires in 7 days".into(),
+        };
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = resp {
+            assert_eq!(v["status"], "delivered");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_notify_event_no_default_recipient() {
+        let engine = create_engine().await;
+
+        let create_ch = CourierCommand::ChannelCreate {
+            name: "no-default".into(),
+            channel_type: "webhook".into(),
+            config_json: "{}".into(),
+        };
+        dispatch(&engine, create_ch, None).await;
+
+        let cmd = CourierCommand::NotifyEvent {
+            channel: "no-default".into(),
+            subject: "test".into(),
+            body: "test".into(),
+        };
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok());
     }
 
     #[tokio::test]

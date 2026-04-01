@@ -87,6 +87,16 @@ parameters = [
 ]
 response = { status = "string", name = "string" }
 
+[commands.NOTIFY_EVENT]
+syntax = "NOTIFY_EVENT <channel> <subject> <body>"
+description = "Trigger a notification on a pre-configured channel (e.g. rotation/expiry alerts)"
+parameters = [
+    { name = "channel", type = "channel_name", required = true, description = "Channel name (must have default_recipient)" },
+    { name = "subject", type = "string", required = true, description = "Notification subject" },
+    { name = "body", type = "string", required = true, description = "Notification body" },
+]
+response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer" }
+
 [commands.DELIVER]
 syntax = "DELIVER <json>"
 description = "Decrypt recipient and deliver a message"

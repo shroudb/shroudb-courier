@@ -141,6 +141,7 @@ async fn main() -> anyhow::Result<()> {
             webhook: seed.webhook.clone(),
             enabled: true,
             created_at: now,
+            default_recipient: None,
         };
 
         // Register SMTP adapter if this is an email channel with config

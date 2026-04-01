@@ -20,6 +20,11 @@ pub enum CourierCommand {
     Deliver {
         request_json: String,
     },
+    NotifyEvent {
+        channel: String,
+        subject: String,
+        body: String,
+    },
     Health,
     Ping,
     CommandList,
@@ -41,6 +46,11 @@ impl CourierCommand {
             CourierCommand::ChannelGet { name } => AclRequirement::Namespace {
                 ns: format!("courier.{name}.*"),
                 scope: Scope::Read,
+                tenant_override: None,
+            },
+            CourierCommand::NotifyEvent { channel, .. } => AclRequirement::Namespace {
+                ns: format!("courier.{channel}.*"),
+                scope: Scope::Write,
                 tenant_override: None,
             },
             CourierCommand::Deliver { .. } => {
@@ -119,6 +129,17 @@ pub fn parse_command(args: &[&str]) -> Result<CourierCommand, String> {
             }
         }
 
+        "NOTIFY_EVENT" => {
+            if args.len() < 4 {
+                return Err("NOTIFY_EVENT requires <channel> <subject> <body>".into());
+            }
+            Ok(CourierCommand::NotifyEvent {
+                channel: args[1].to_string(),
+                subject: args[2].to_string(),
+                body: args[3].to_string(),
+            })
+        }
+
         "DELIVER" => {
             if args.len() < 2 {
                 return Err("DELIVER requires a JSON request".into());
@@ -178,6 +199,52 @@ mod tests {
     fn test_parse_channel_delete() {
         let cmd = parse_command(&["CHANNEL", "DELETE", "old"]).unwrap();
         assert!(matches!(cmd, CourierCommand::ChannelDelete { name } if name == "old"));
+    }
+
+    #[test]
+    fn test_parse_notify_event() {
+        let cmd = parse_command(&[
+            "NOTIFY_EVENT",
+            "rotation-alerts",
+            "Key expiry",
+            "Key X expires",
+        ])
+        .unwrap();
+        match cmd {
+            CourierCommand::NotifyEvent {
+                channel,
+                subject,
+                body,
+            } => {
+                assert_eq!(channel, "rotation-alerts");
+                assert_eq!(subject, "Key expiry");
+                assert_eq!(body, "Key X expires");
+            }
+            _ => panic!("expected NotifyEvent"),
+        }
+    }
+
+    #[test]
+    fn test_parse_notify_event_missing_args() {
+        assert!(parse_command(&["NOTIFY_EVENT"]).is_err());
+        assert!(parse_command(&["NOTIFY_EVENT", "ch"]).is_err());
+        assert!(parse_command(&["NOTIFY_EVENT", "ch", "subj"]).is_err());
+    }
+
+    #[test]
+    fn test_acl_notify_event() {
+        let cmd = CourierCommand::NotifyEvent {
+            channel: "rotation-alerts".into(),
+            subject: "test".into(),
+            body: "test".into(),
+        };
+        match cmd.acl_requirement() {
+            AclRequirement::Namespace { ns, scope, .. } => {
+                assert_eq!(ns, "courier.rotation-alerts.*");
+                assert_eq!(scope, Scope::Write);
+            }
+            _ => panic!("expected Namespace requirement"),
+        }
     }
 
     #[test]

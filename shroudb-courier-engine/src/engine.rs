@@ -128,6 +128,37 @@ impl<S: Store> CourierEngine<S> {
         Ok(result.receipt)
     }
 
+    // --- Event notifications ---
+
+    /// Convenience method for engine schedulers (e.g. Cipher key rotation, Forge cert expiry)
+    /// to trigger a notification on a pre-configured channel. The channel must have a
+    /// `default_recipient` set; otherwise this returns an error.
+    pub async fn notify_event(
+        &self,
+        channel_name: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<DeliveryReceipt, CourierError> {
+        let channel = self.channel_manager.get(channel_name)?;
+        let recipient = channel.default_recipient.as_deref().ok_or_else(|| {
+            CourierError::InvalidArgument(format!(
+                "channel '{}' has no default_recipient configured for event notifications",
+                channel_name
+            ))
+        })?;
+
+        let request = DeliveryRequest {
+            channel: channel_name.to_string(),
+            recipient: recipient.to_string(),
+            subject: Some(subject.to_string()),
+            body: Some(body.to_string()),
+            body_encrypted: None,
+            content_type: None,
+        };
+
+        self.deliver(request).await
+    }
+
     // --- Seeding ---
 
     pub async fn seed_channel(&self, channel: Channel) -> Result<(), CourierError> {
@@ -226,6 +257,7 @@ mod tests {
             webhook: None,
             enabled: true,
             created_at: 1000,
+            default_recipient: None,
         };
         engine.channel_create(ch).await.unwrap();
 
@@ -257,6 +289,7 @@ mod tests {
             webhook: None,
             enabled: true,
             created_at: 1000,
+            default_recipient: None,
         };
         engine.channel_create(ch).await.unwrap();
 
@@ -284,6 +317,7 @@ mod tests {
             webhook: None,
             enabled: false,
             created_at: 1000,
+            default_recipient: None,
         };
         engine.channel_create(ch).await.unwrap();
 
@@ -316,6 +350,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_notify_event_delivers_to_channel() {
+        let engine = create_engine().await;
+
+        let ch = Channel {
+            name: "rotation-alerts".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: Some("https://ops.example.com/alerts".into()),
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let receipt = engine
+            .notify_event(
+                "rotation-alerts",
+                "Key rotation approaching",
+                "Key 'master-key-1' expires in 24 hours",
+            )
+            .await
+            .unwrap();
+        assert_eq!(receipt.status, DeliveryStatus::Delivered);
+    }
+
+    #[tokio::test]
+    async fn test_notify_event_no_default_recipient() {
+        let engine = create_engine().await;
+
+        let ch = Channel {
+            name: "no-recipient".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let result = engine.notify_event("no-recipient", "subject", "body").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_deliver_webhook() {
         let engine = create_engine().await;
 
@@ -330,6 +417,7 @@ mod tests {
             }),
             enabled: true,
             created_at: 1000,
+            default_recipient: None,
         };
         engine.channel_create(ch).await.unwrap();
 
