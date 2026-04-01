@@ -34,8 +34,9 @@ impl<S: Store> CourierEngine<S> {
         })
     }
 
-    /// Emit an audit event to Chronicle. Warn-only on failure — Courier is
-    /// infrastructure and must not fail because auditing is unavailable.
+    /// Emit an audit event to Chronicle. If chronicle is not configured, this
+    /// is a no-op. If chronicle is configured but unreachable, returns an error
+    /// so security-critical callers can fail closed.
     async fn emit_audit_event(
         &self,
         operation: &str,
@@ -43,9 +44,9 @@ impl<S: Store> CourierEngine<S> {
         result: EventResult,
         actor: Option<&str>,
         start: Instant,
-    ) {
+    ) -> Result<(), CourierError> {
         let Some(chronicle) = &self.chronicle else {
-            return;
+            return Ok(());
         };
         let mut event = Event::new(
             AuditEngine::Courier,
@@ -55,9 +56,11 @@ impl<S: Store> CourierEngine<S> {
             actor.unwrap_or("anonymous").to_string(),
         );
         event.duration_ms = start.elapsed().as_millis() as u64;
-        if let Err(e) = chronicle.record(event).await {
-            tracing::warn!(operation, resource, error = %e, "failed to emit audit event");
-        }
+        chronicle
+            .record(event)
+            .await
+            .map_err(|e| CourierError::Internal(format!("audit failed: {e}")))?;
+        Ok(())
     }
 
     pub fn register_adapter(&self, channel_type: ChannelType, adapter: Arc<dyn DeliveryAdapter>) {
@@ -77,7 +80,7 @@ impl<S: Store> CourierEngine<S> {
             None,
             start,
         )
-        .await;
+        .await?;
         tracing::info!(name = %channel.name, channel_type = %channel.channel_type, "channel created");
         Ok(())
     }
@@ -94,7 +97,7 @@ impl<S: Store> CourierEngine<S> {
         let start = Instant::now();
         self.channel_manager.delete(name).await?;
         self.emit_audit_event("CHANNEL_DELETE", name, EventResult::Ok, None, start)
-            .await;
+            .await?;
         tracing::info!(name = %name, "channel deleted");
         Ok(())
     }
@@ -121,7 +124,7 @@ impl<S: Store> CourierEngine<S> {
             execute_delivery(&request, self.decryptor.as_deref(), adapter.as_ref()).await?;
 
         self.emit_audit_event("DELIVER", &request.channel, EventResult::Ok, None, start)
-            .await;
+            .await?;
         Ok(result.receipt)
     }
 
