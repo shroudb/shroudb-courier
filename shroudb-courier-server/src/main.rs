@@ -11,7 +11,7 @@ use shroudb_courier_core::{Channel, ChannelType};
 use shroudb_courier_engine::CourierEngine;
 use tokio::net::TcpListener;
 
-use crate::config::{build_token_validator, load_config};
+use crate::config::load_config;
 
 #[derive(Parser)]
 #[command(
@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Auth
-    let token_validator = build_token_validator(&cfg.auth);
+    let token_validator = cfg.auth.build_validator();
 
     // TCP listener
     let listener = TcpListener::bind(&cfg.server.tcp_bind).await?;
