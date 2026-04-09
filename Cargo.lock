@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-cli"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-client"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -1865,7 +1865,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-engine"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "dashmap",
  "serde",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-protocol"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -1912,7 +1912,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-server"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "base64",
