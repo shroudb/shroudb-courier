@@ -92,11 +92,25 @@ impl DeliveryAdapter for SmtpAdapter {
     }
 }
 
-pub struct WebhookAdapter;
+pub struct WebhookAdapter {
+    /// Optional HMAC-SHA256 signing secret for webhook request authentication.
+    /// When set, each POST includes an `X-ShrouDB-Signature` header containing
+    /// the hex-encoded HMAC-SHA256 of the request body.
+    signing_secret: Option<Vec<u8>>,
+}
 
 impl WebhookAdapter {
     pub fn new() -> Self {
-        Self
+        Self {
+            signing_secret: None,
+        }
+    }
+
+    /// Create a webhook adapter with HMAC-SHA256 request signing.
+    pub fn with_signing_secret(secret: Vec<u8>) -> Self {
+        Self {
+            signing_secret: Some(secret),
+        }
     }
 }
 
@@ -115,14 +129,31 @@ impl DeliveryAdapter for WebhookAdapter {
                 "content_type": message.content_type.to_string(),
             });
 
-            let response = client
+            let body_bytes = serde_json::to_vec(&body).map_err(|e| {
+                CourierError::DeliveryFailed(format!("JSON serialization failed: {e}"))
+            })?;
+
+            let mut request = client
                 .post(recipient)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| {
-                    CourierError::DeliveryFailed(format!("webhook request failed: {e}"))
-                })?;
+                .header("content-type", "application/json");
+
+            // Sign the body if a signing secret is configured
+            if let Some(ref secret) = self.signing_secret {
+                let signature = shroudb_crypto::hmac_sign(
+                    shroudb_crypto::HmacAlgorithm::Sha256,
+                    secret,
+                    &body_bytes,
+                )
+                .map_err(|e| CourierError::DeliveryFailed(format!("HMAC signing failed: {e}")))?;
+                request = request.header(
+                    "X-ShrouDB-Signature",
+                    format!("sha256={}", hex::encode(&signature)),
+                );
+            }
+
+            let response = request.body(body_bytes).send().await.map_err(|e| {
+                CourierError::DeliveryFailed(format!("webhook request failed: {e}"))
+            })?;
 
             let status = response.status();
             if !status.is_success() {
@@ -144,5 +175,64 @@ impl DeliveryAdapter for WebhookAdapter {
                 error: None,
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webhook_signature_computation() {
+        // Verify HMAC-SHA256 signature matches expected value
+        let secret = b"test-secret-key";
+        let body = serde_json::json!({
+            "subject": "Test Subject",
+            "body": "Hello, world!",
+            "content_type": "text/plain",
+        });
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+
+        let signature =
+            shroudb_crypto::hmac_sign(shroudb_crypto::HmacAlgorithm::Sha256, secret, &body_bytes)
+                .unwrap();
+
+        let header_value = format!("sha256={}", hex::encode(&signature));
+        assert!(header_value.starts_with("sha256="));
+        assert_eq!(header_value.len(), 7 + 64); // "sha256=" + 64 hex chars
+
+        // Verify with the same function the recipient would use
+        let verified = shroudb_crypto::hmac_verify(
+            shroudb_crypto::HmacAlgorithm::Sha256,
+            secret,
+            &body_bytes,
+            &signature,
+        )
+        .unwrap();
+        assert!(verified, "recipient should be able to verify signature");
+
+        // Tampered body fails verification
+        let mut tampered = body_bytes.clone();
+        tampered[0] ^= 0xFF;
+        let tampered_verify = shroudb_crypto::hmac_verify(
+            shroudb_crypto::HmacAlgorithm::Sha256,
+            secret,
+            &tampered,
+            &signature,
+        )
+        .unwrap();
+        assert!(!tampered_verify, "tampered body should fail verification");
+    }
+
+    #[test]
+    fn webhook_adapter_with_signing_secret_has_secret() {
+        let adapter = WebhookAdapter::with_signing_secret(b"my-secret".to_vec());
+        assert!(adapter.signing_secret.is_some());
+    }
+
+    #[test]
+    fn webhook_adapter_new_has_no_secret() {
+        let adapter = WebhookAdapter::new();
+        assert!(adapter.signing_secret.is_none());
     }
 }

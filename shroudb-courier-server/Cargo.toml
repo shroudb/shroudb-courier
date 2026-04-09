@@ -21,7 +21,9 @@ shroudb-acl = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }
 shroudb-cipher-client = { workspace = true }
+shroudb-crypto = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
+hex = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

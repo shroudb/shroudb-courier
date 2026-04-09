@@ -105,6 +105,32 @@ parameters = [
 ]
 response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer" }
 
+[commands.DELIVERY_GET]
+syntax = "DELIVERY GET <id>"
+description = "Get a delivery receipt by ID"
+acl = "admin"
+parameters = [
+    { name = "id", type = "string", required = true, description = "Delivery ID (UUID)" },
+]
+response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer", error = "string" }
+errors = ["NOTFOUND"]
+
+[commands.DELIVERY_LIST]
+syntax = "DELIVERY LIST [CHANNEL <name>] [LIMIT <n>]"
+description = "List delivery receipts, optionally filtered by channel"
+acl = "admin"
+parameters = [
+    { name = "CHANNEL", type = "channel_name", required = false, description = "Filter by channel name" },
+    { name = "LIMIT", type = "integer", required = false, description = "Max receipts to return (default 100)" },
+]
+response = { status = "string", count = "integer", receipts = "array" }
+
+[commands.METRICS]
+syntax = "METRICS"
+description = "Get delivery metrics (total, success, failure counts, per-channel breakdown)"
+acl = "none"
+response = { total_deliveries = "integer", delivered = "integer", failed = "integer", per_channel = "object" }
+
 [commands.HEALTH]
 syntax = "HEALTH"
 description = "Server health check"

@@ -2,21 +2,53 @@ use dashmap::DashMap;
 use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_chronicle_core::event::{Engine as AuditEngine, Event, EventResult};
 use shroudb_chronicle_core::ops::ChronicleOps;
-use shroudb_courier_core::{Channel, ChannelType, CourierError, DeliveryReceipt, DeliveryRequest};
+use shroudb_courier_core::{
+    Channel, ChannelType, CourierError, DeliveryReceipt, DeliveryRequest, DeliveryStatus,
+};
 use shroudb_store::Store;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::capabilities::{Decryptor, DeliveryAdapter};
 use crate::channel_manager::ChannelManager;
-use crate::delivery::execute_delivery;
+use crate::delivery::{RetryConfig, execute_delivery_with_retry};
+
+/// Policy enforcement mode for engine-level ABAC checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolicyMode {
+    /// Fail-closed: if no PolicyEvaluator is configured, deny all operations.
+    /// This is the secure default.
+    #[default]
+    Closed,
+    /// Explicit opt-in to permissive mode: if no PolicyEvaluator is configured,
+    /// allow all operations. Only appropriate for development/testing.
+    Open,
+}
+
+const RECEIPTS_NAMESPACE: &str = "courier.receipts";
+
+/// In-memory delivery metrics. Counters use relaxed ordering since
+/// absolute precision is not required for operational metrics.
+#[derive(Debug, Default)]
+pub struct DeliveryMetrics {
+    pub total: AtomicU64,
+    pub delivered: AtomicU64,
+    pub failed: AtomicU64,
+}
 
 pub struct CourierEngine<S: Store> {
+    store: Arc<S>,
     channel_manager: ChannelManager<S>,
     decryptor: Option<Arc<dyn Decryptor>>,
     adapters: DashMap<ChannelType, Arc<dyn DeliveryAdapter>>,
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+    policy_mode: PolicyMode,
+    retry_config: RetryConfig,
     chronicle: Option<Arc<dyn ChronicleOps>>,
+    metrics: DeliveryMetrics,
+    /// Per-channel delivery counts (channel_name → count).
+    channel_metrics: DashMap<String, AtomicU64>,
 }
 
 impl<S: Store> CourierEngine<S> {
@@ -26,15 +58,46 @@ impl<S: Store> CourierEngine<S> {
         policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
         chronicle: Option<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CourierError> {
-        let channel_manager = ChannelManager::new(store);
+        Self::new_with_policy_mode(
+            store,
+            decryptor,
+            policy_evaluator,
+            chronicle,
+            PolicyMode::default(),
+        )
+        .await
+    }
+
+    pub async fn new_with_policy_mode(
+        store: Arc<S>,
+        decryptor: Option<Arc<dyn Decryptor>>,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
+        policy_mode: PolicyMode,
+    ) -> Result<Self, CourierError> {
+        let channel_manager = ChannelManager::new(store.clone());
         channel_manager.init().await?;
 
+        // Create receipts namespace
+        store
+            .namespace_create(RECEIPTS_NAMESPACE, Default::default())
+            .await
+            .or_else(|e| match e {
+                shroudb_store::StoreError::NamespaceExists(_) => Ok(()),
+                other => Err(CourierError::Store(other.to_string())),
+            })?;
+
         Ok(Self {
+            store,
             channel_manager,
             decryptor,
             adapters: DashMap::new(),
             policy_evaluator,
+            policy_mode,
+            retry_config: RetryConfig::default(),
             chronicle,
+            metrics: DeliveryMetrics::default(),
+            channel_metrics: DashMap::new(),
         })
     }
 
@@ -45,7 +108,15 @@ impl<S: Store> CourierEngine<S> {
         actor: Option<&str>,
     ) -> Result<(), CourierError> {
         let Some(evaluator) = &self.policy_evaluator else {
-            return Ok(());
+            // Fail-closed: no evaluator configured means deny unless explicitly open
+            if self.policy_mode == PolicyMode::Open {
+                return Ok(());
+            }
+            return Err(CourierError::PolicyDenied {
+                action: action.to_string(),
+                resource: resource_id.to_string(),
+                policy: "no policy evaluator configured (fail-closed)".to_string(),
+            });
         };
         let request = PolicyRequest {
             principal: PolicyPrincipal {
@@ -164,12 +235,21 @@ impl<S: Store> CourierEngine<S> {
             .map(|entry| Arc::clone(entry.value()))
             .ok_or_else(|| CourierError::AdapterNotConfigured(channel.channel_type.to_string()))?;
 
-        let result =
-            execute_delivery(&request, self.decryptor.as_deref(), adapter.as_ref()).await?;
+        let result = execute_delivery_with_retry(
+            &request,
+            self.decryptor.as_deref(),
+            adapter.as_ref(),
+            &self.retry_config,
+        )
+        .await?;
+
+        let receipt = result.receipt;
+        self.record_metrics(&receipt);
+        self.persist_receipt(&receipt).await?;
 
         self.emit_audit_event("DELIVER", &request.channel, EventResult::Ok, None, start)
             .await?;
-        Ok(result.receipt)
+        Ok(receipt)
     }
 
     // --- Event notifications ---
@@ -201,6 +281,116 @@ impl<S: Store> CourierEngine<S> {
         };
 
         self.deliver(request).await
+    }
+
+    // --- Receipt persistence ---
+
+    async fn persist_receipt(&self, receipt: &DeliveryReceipt) -> Result<(), CourierError> {
+        let data =
+            serde_json::to_vec(receipt).map_err(|e| CourierError::Internal(e.to_string()))?;
+        self.store
+            .put(
+                RECEIPTS_NAMESPACE,
+                receipt.delivery_id.as_bytes(),
+                &data,
+                None,
+            )
+            .await
+            .map_err(|e| CourierError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    fn record_metrics(&self, receipt: &DeliveryReceipt) {
+        self.metrics.total.fetch_add(1, Ordering::Relaxed);
+        match receipt.status {
+            DeliveryStatus::Delivered => {
+                self.metrics.delivered.fetch_add(1, Ordering::Relaxed);
+            }
+            DeliveryStatus::Failed => {
+                self.metrics.failed.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        self.channel_metrics
+            .entry(receipt.channel.clone())
+            .or_default()
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Retrieve a delivery receipt by ID.
+    pub async fn delivery_get(&self, id: &str) -> Result<DeliveryReceipt, CourierError> {
+        let entry = self
+            .store
+            .get(RECEIPTS_NAMESPACE, id.as_bytes(), None)
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("not found") {
+                    CourierError::InvalidArgument(format!("delivery not found: {id}"))
+                } else {
+                    CourierError::Store(msg)
+                }
+            })?;
+        serde_json::from_slice(&entry.value)
+            .map_err(|e| CourierError::Internal(format!("corrupt receipt data: {e}")))
+    }
+
+    /// List recent delivery receipts, optionally filtered by channel.
+    pub async fn delivery_list(
+        &self,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<DeliveryReceipt>, CourierError> {
+        let mut receipts = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        'outer: loop {
+            let page = self
+                .store
+                .list(RECEIPTS_NAMESPACE, None, cursor.as_deref(), 100)
+                .await
+                .map_err(|e| CourierError::Store(e.to_string()))?;
+
+            for key in &page.keys {
+                let entry = self
+                    .store
+                    .get(RECEIPTS_NAMESPACE, key, None)
+                    .await
+                    .map_err(|e| CourierError::Store(e.to_string()))?;
+                if let Ok(receipt) = serde_json::from_slice::<DeliveryReceipt>(&entry.value)
+                    && (channel.is_none() || channel == Some(receipt.channel.as_str()))
+                {
+                    receipts.push(receipt);
+                    if receipts.len() >= limit {
+                        break 'outer;
+                    }
+                }
+            }
+
+            match page.cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+
+        Ok(receipts)
+    }
+
+    /// Get current delivery metrics.
+    pub fn metrics(&self) -> serde_json::Value {
+        let mut per_channel = serde_json::Map::new();
+        for entry in self.channel_metrics.iter() {
+            per_channel.insert(
+                entry.key().clone(),
+                serde_json::json!(entry.value().load(Ordering::Relaxed)),
+            );
+        }
+
+        serde_json::json!({
+            "total_deliveries": self.metrics.total.load(Ordering::Relaxed),
+            "delivered": self.metrics.delivered.load(Ordering::Relaxed),
+            "failed": self.metrics.failed.load(Ordering::Relaxed),
+            "per_channel": per_channel,
+        })
     }
 
     // --- Seeding ---
@@ -265,9 +455,15 @@ mod tests {
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
-            .await
-            .unwrap();
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Some(Arc::new(MockDecryptor)),
+            None,
+            None,
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
         engine.register_adapter(
             ChannelType::Email,
             Arc::new(MockAdapter {
@@ -531,5 +727,245 @@ mod tests {
             msg.contains("policy denied"),
             "expected policy denied error, got: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn no_evaluator_default_closed_denies() {
+        let store = shroudb_storage::test_util::create_test_store("courier-closed-test").await;
+        // Default PolicyMode::Closed, no evaluator
+        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
+            .await
+            .unwrap();
+
+        let ch = Channel {
+            name: "test".into(),
+            channel_type: ChannelType::Email,
+            smtp: None,
+            webhook: None,
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        let err = engine.channel_create(ch).await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("no policy evaluator configured"),
+            "expected fail-closed message, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_open_mode_permits_without_evaluator() {
+        let store = shroudb_storage::test_util::create_test_store("courier-open-test").await;
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Some(Arc::new(MockDecryptor)),
+            None,
+            None,
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(
+            ChannelType::Email,
+            Arc::new(MockAdapter {
+                channel_type: ChannelType::Email,
+            }),
+        );
+
+        let ch = Channel {
+            name: "allowed".into(),
+            channel_type: ChannelType::Email,
+            smtp: None,
+            webhook: None,
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        let result = engine.channel_create(ch).await;
+        assert!(result.is_ok(), "open mode should allow without evaluator");
+    }
+
+    #[tokio::test]
+    async fn evaluator_present_evaluates_normally() {
+        use shroudb_acl::{
+            AclError, PolicyDecision, PolicyEffect, PolicyRequest as AclPolicyRequest,
+        };
+
+        struct PermitAll;
+        impl PolicyEvaluator for PermitAll {
+            fn evaluate(
+                &self,
+                _request: &AclPolicyRequest,
+            ) -> Pin<
+                Box<dyn std::future::Future<Output = Result<PolicyDecision, AclError>> + Send + '_>,
+            > {
+                Box::pin(async {
+                    Ok(PolicyDecision {
+                        effect: PolicyEffect::Permit,
+                        matched_policy: None,
+                        token: None,
+                        cache_until: None,
+                    })
+                })
+            }
+        }
+
+        let store = shroudb_storage::test_util::create_test_store("courier-eval-test").await;
+        // Default closed mode, but evaluator IS present — should evaluate normally
+        let engine = CourierEngine::new(
+            store,
+            Some(Arc::new(MockDecryptor)),
+            Some(Arc::new(PermitAll)),
+            None,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(
+            ChannelType::Webhook,
+            Arc::new(MockAdapter {
+                channel_type: ChannelType::Webhook,
+            }),
+        );
+
+        let ch = Channel {
+            name: "eval-test".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: None,
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        let result = engine.channel_create(ch).await;
+        assert!(result.is_ok(), "present evaluator should permit");
+    }
+
+    // ── Delivery persistence (LOW-23) ─────────────────────────────
+
+    #[tokio::test]
+    async fn test_delivery_receipt_persisted() {
+        let engine = create_engine().await;
+
+        let ch = Channel {
+            name: "persist-ch".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let req = DeliveryRequest {
+            channel: "persist-ch".into(),
+            recipient: "enc:https://example.com/hook".into(),
+            subject: None,
+            body: Some("test payload".into()),
+            body_encrypted: None,
+            content_type: None,
+        };
+        let receipt = engine.deliver(req).await.unwrap();
+        assert_eq!(receipt.status, DeliveryStatus::Delivered);
+
+        // Should be retrievable by ID
+        let fetched = engine.delivery_get(&receipt.delivery_id).await.unwrap();
+        assert_eq!(fetched.delivery_id, receipt.delivery_id);
+        assert_eq!(fetched.status, DeliveryStatus::Delivered);
+    }
+
+    #[tokio::test]
+    async fn test_delivery_list_returns_receipts() {
+        let engine = create_engine().await;
+
+        let ch = Channel {
+            name: "list-ch".into(),
+            channel_type: ChannelType::Email,
+            smtp: Some(SmtpConfig {
+                host: "smtp.test.com".into(),
+                port: 587,
+                username: None,
+                password: None,
+                from_address: "test@test.com".into(),
+                starttls: true,
+            }),
+            webhook: None,
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        // Deliver twice
+        for _ in 0..2 {
+            let req = DeliveryRequest {
+                channel: "list-ch".into(),
+                recipient: "enc:user@example.com".into(),
+                subject: Some("Hello".into()),
+                body: Some("World".into()),
+                body_encrypted: None,
+                content_type: None,
+            };
+            engine.deliver(req).await.unwrap();
+        }
+
+        let receipts = engine.delivery_list(None, 100).await.unwrap();
+        assert!(receipts.len() >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_delivery_get_nonexistent() {
+        let engine = create_engine().await;
+        let result = engine.delivery_get("no-such-id").await;
+        assert!(result.is_err());
+    }
+
+    // ── Metrics (LOW-24) ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_metrics_increment_on_delivery() {
+        let engine = create_engine().await;
+
+        let ch = Channel {
+            name: "metrics-ch".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        // Initial metrics
+        let m = engine.metrics();
+        assert_eq!(m["total_deliveries"].as_u64().unwrap(), 0);
+
+        // Deliver
+        let req = DeliveryRequest {
+            channel: "metrics-ch".into(),
+            recipient: "enc:https://example.com".into(),
+            subject: None,
+            body: Some("test".into()),
+            body_encrypted: None,
+            content_type: None,
+        };
+        engine.deliver(req).await.unwrap();
+
+        let m = engine.metrics();
+        assert_eq!(m["total_deliveries"].as_u64().unwrap(), 1);
+        assert_eq!(m["delivered"].as_u64().unwrap(), 1);
+        assert_eq!(m["failed"].as_u64().unwrap(), 0);
+        assert!(m["per_channel"]["webhook"].as_u64().unwrap() >= 1);
     }
 }

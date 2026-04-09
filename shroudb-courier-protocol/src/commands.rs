@@ -25,6 +25,14 @@ pub enum CourierCommand {
         subject: String,
         body: String,
     },
+    DeliveryGet {
+        id: String,
+    },
+    DeliveryList {
+        channel: Option<String>,
+        limit: usize,
+    },
+    Metrics,
     Health,
     Ping,
     CommandList,
@@ -37,7 +45,12 @@ impl CourierCommand {
             | CourierCommand::Health
             | CourierCommand::Ping
             | CourierCommand::CommandList
+            | CourierCommand::Metrics
             | CourierCommand::ChannelList => AclRequirement::None,
+
+            CourierCommand::DeliveryGet { .. } | CourierCommand::DeliveryList { .. } => {
+                AclRequirement::Admin
+            }
 
             CourierCommand::ChannelCreate { .. } | CourierCommand::ChannelDelete { .. } => {
                 AclRequirement::Admin
@@ -149,6 +162,56 @@ pub fn parse_command(args: &[&str]) -> Result<CourierCommand, String> {
             })
         }
 
+        "DELIVERY" => {
+            if args.len() < 2 {
+                return Err("DELIVERY requires a subcommand (GET, LIST)".into());
+            }
+            let sub = args[1].to_uppercase();
+            match sub.as_str() {
+                "GET" => {
+                    if args.len() < 3 {
+                        return Err("DELIVERY GET requires <id>".into());
+                    }
+                    Ok(CourierCommand::DeliveryGet {
+                        id: args[2].to_string(),
+                    })
+                }
+                "LIST" => {
+                    let mut channel = None;
+                    let mut limit = 100usize;
+                    let mut i = 2;
+                    while i < args.len() {
+                        match args[i].to_uppercase().as_str() {
+                            "CHANNEL" => {
+                                if i + 1 < args.len() {
+                                    channel = Some(args[i + 1].to_string());
+                                    i += 2;
+                                } else {
+                                    return Err("CHANNEL requires a name".into());
+                                }
+                            }
+                            "LIMIT" => {
+                                if i + 1 < args.len() {
+                                    limit = args[i + 1]
+                                        .parse()
+                                        .map_err(|_| "LIMIT must be a number".to_string())?;
+                                    i += 2;
+                                } else {
+                                    return Err("LIMIT requires a number".into());
+                                }
+                            }
+                            _ => {
+                                return Err(format!("unknown DELIVERY LIST option: {}", args[i]));
+                            }
+                        }
+                    }
+                    Ok(CourierCommand::DeliveryList { channel, limit })
+                }
+                other => Err(format!("unknown DELIVERY subcommand: {other}")),
+            }
+        }
+
+        "METRICS" => Ok(CourierCommand::Metrics),
         "HEALTH" => Ok(CourierCommand::Health),
         "PING" => Ok(CourierCommand::Ping),
 
@@ -282,11 +345,75 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_delivery_get() {
+        let cmd = parse_command(&["DELIVERY", "GET", "abc-123"]).unwrap();
+        assert!(matches!(cmd, CourierCommand::DeliveryGet { id } if id == "abc-123"));
+    }
+
+    #[test]
+    fn test_parse_delivery_list() {
+        let cmd = parse_command(&["DELIVERY", "LIST"]).unwrap();
+        assert!(matches!(
+            cmd,
+            CourierCommand::DeliveryList {
+                channel: None,
+                limit: 100
+            }
+        ));
+    }
+
+    #[test]
+    fn test_parse_delivery_list_with_channel() {
+        let cmd = parse_command(&["DELIVERY", "LIST", "CHANNEL", "email-prod"]).unwrap();
+        assert!(
+            matches!(cmd, CourierCommand::DeliveryList { channel: Some(c), limit: 100 } if c == "email-prod")
+        );
+    }
+
+    #[test]
+    fn test_parse_delivery_list_with_limit() {
+        let cmd = parse_command(&["DELIVERY", "LIST", "LIMIT", "50"]).unwrap();
+        assert!(matches!(
+            cmd,
+            CourierCommand::DeliveryList {
+                channel: None,
+                limit: 50
+            }
+        ));
+    }
+
+    #[test]
+    fn test_parse_delivery_list_with_channel_and_limit() {
+        let cmd =
+            parse_command(&["DELIVERY", "LIST", "CHANNEL", "webhook", "LIMIT", "25"]).unwrap();
+        assert!(
+            matches!(cmd, CourierCommand::DeliveryList { channel: Some(c), limit: 25 } if c == "webhook")
+        );
+    }
+
+    #[test]
+    fn test_parse_delivery_missing_subcommand() {
+        assert!(parse_command(&["DELIVERY"]).is_err());
+    }
+
+    #[test]
+    fn test_parse_delivery_get_missing_id() {
+        assert!(parse_command(&["DELIVERY", "GET"]).is_err());
+    }
+
+    #[test]
+    fn test_parse_metrics() {
+        let cmd = parse_command(&["METRICS"]).unwrap();
+        assert!(matches!(cmd, CourierCommand::Metrics));
+    }
+
+    #[test]
     fn test_acl_public_commands() {
         let cmds = [
             CourierCommand::Health,
             CourierCommand::Ping,
             CourierCommand::CommandList,
+            CourierCommand::Metrics,
             CourierCommand::ChannelList,
         ];
         for cmd in &cmds {
@@ -296,13 +423,18 @@ mod tests {
 
     #[test]
     fn test_acl_admin_commands() {
-        let cmds = [
+        let cmds: Vec<CourierCommand> = vec![
             CourierCommand::ChannelCreate {
                 name: "x".into(),
                 channel_type: "email".into(),
                 config_json: "{}".into(),
             },
             CourierCommand::ChannelDelete { name: "x".into() },
+            CourierCommand::DeliveryGet { id: "x".into() },
+            CourierCommand::DeliveryList {
+                channel: None,
+                limit: 100,
+            },
         ];
         for cmd in &cmds {
             assert_eq!(cmd.acl_requirement(), AclRequirement::Admin);

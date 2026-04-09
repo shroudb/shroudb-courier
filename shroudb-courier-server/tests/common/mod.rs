@@ -125,7 +125,9 @@ fn generate_config(tcp_addr: &str, config: &TestServerConfig) -> String {
 
     // Root-level keys must come before any [section] header
     toml.push_str(&format!(
-        r#"[server]
+        r#"policy_mode = "open"
+
+[server]
 tcp_bind = "{tcp_addr}"
 log_level = "warn"
 

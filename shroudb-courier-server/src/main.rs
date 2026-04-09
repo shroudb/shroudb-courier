@@ -81,16 +81,23 @@ async fn main() -> anyhow::Result<()> {
         };
 
     // Engine
-    let engine = CourierEngine::new(Arc::clone(&store), decryptor, None, None)
-        .await
-        .context("failed to initialize courier engine")?;
+    let policy_mode = match cfg.policy_mode.as_str() {
+        "open" => shroudb_courier_engine::PolicyMode::Open,
+        _ => shroudb_courier_engine::PolicyMode::Closed,
+    };
+    let engine =
+        CourierEngine::new_with_policy_mode(Arc::clone(&store), decryptor, None, None, policy_mode)
+            .await
+            .context("failed to initialize courier engine")?;
     let engine = Arc::new(engine);
 
     // Register adapters
-    engine.register_adapter(
-        ChannelType::Webhook,
-        Arc::new(adapters::WebhookAdapter::new()),
-    );
+    let webhook_adapter = if let Some(ref secret) = cfg.webhook_signing_secret {
+        adapters::WebhookAdapter::with_signing_secret(secret.as_bytes().to_vec())
+    } else {
+        adapters::WebhookAdapter::new()
+    };
+    engine.register_adapter(ChannelType::Webhook, Arc::new(webhook_adapter));
 
     // Seed channels from config
     for (name, seed) in &cfg.channels {

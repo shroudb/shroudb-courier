@@ -15,6 +15,17 @@ pub struct CourierServerConfig {
     pub cipher: Option<CipherConfig>,
     #[serde(default)]
     pub channels: HashMap<String, ChannelSeedConfig>,
+    /// Policy enforcement mode. Default is "closed" (deny when no evaluator).
+    /// Set to "open" only for development/testing.
+    #[serde(default = "default_policy_mode")]
+    pub policy_mode: String,
+    /// Optional HMAC-SHA256 signing secret for webhook deliveries.
+    /// When set, each webhook POST includes an `X-ShrouDB-Signature` header.
+    pub webhook_signing_secret: Option<String>,
+}
+
+fn default_policy_mode() -> String {
+    "closed".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +108,8 @@ pub fn load_config(path: Option<&str>) -> anyhow::Result<CourierServerConfig> {
             auth: ServerAuthConfig::default(),
             cipher: None,
             channels: HashMap::new(),
+            policy_mode: default_policy_mode(),
+            webhook_signing_secret: None,
         }),
     }
 }

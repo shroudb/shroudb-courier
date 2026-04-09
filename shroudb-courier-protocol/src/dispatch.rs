@@ -39,6 +39,14 @@ pub async fn dispatch<S: Store>(
 
         CourierCommand::Deliver { request_json } => handle_deliver(engine, &request_json).await,
 
+        CourierCommand::DeliveryGet { id } => handle_delivery_get(engine, &id).await,
+
+        CourierCommand::DeliveryList { channel, limit } => {
+            handle_delivery_list(engine, channel.as_deref(), limit).await
+        }
+
+        CourierCommand::Metrics => handle_metrics(engine),
+
         CourierCommand::Health => {
             let channels = engine.channel_list();
             CourierResponse::ok(serde_json::json!({
@@ -52,9 +60,10 @@ pub async fn dispatch<S: Store>(
         CourierCommand::CommandList => CourierResponse::ok(serde_json::json!({
             "commands": [
                 "AUTH", "CHANNEL CREATE", "CHANNEL GET", "CHANNEL LIST", "CHANNEL DELETE",
-                "DELIVER", "NOTIFY_EVENT", "HEALTH", "PING", "COMMAND LIST"
+                "DELIVER", "DELIVERY GET", "DELIVERY LIST", "NOTIFY_EVENT",
+                "METRICS", "HEALTH", "PING", "COMMAND LIST"
             ],
-            "count": 10
+            "count": 13
         })),
     }
 }
@@ -183,6 +192,41 @@ async fn handle_deliver<S: Store>(
     }
 }
 
+async fn handle_delivery_get<S: Store>(engine: &CourierEngine<S>, id: &str) -> CourierResponse {
+    match engine.delivery_get(id).await {
+        Ok(receipt) => match serde_json::to_value(&receipt) {
+            Ok(v) => CourierResponse::ok(v),
+            Err(e) => CourierResponse::error(format!("serialization error: {e}")),
+        },
+        Err(e) => CourierResponse::error(e.to_string()),
+    }
+}
+
+async fn handle_delivery_list<S: Store>(
+    engine: &CourierEngine<S>,
+    channel: Option<&str>,
+    limit: usize,
+) -> CourierResponse {
+    match engine.delivery_list(channel, limit).await {
+        Ok(receipts) => {
+            let entries: Vec<serde_json::Value> = receipts
+                .iter()
+                .filter_map(|r| serde_json::to_value(r).ok())
+                .collect();
+            CourierResponse::ok(serde_json::json!({
+                "status": "ok",
+                "count": entries.len(),
+                "receipts": entries,
+            }))
+        }
+        Err(e) => CourierResponse::error(e.to_string()),
+    }
+}
+
+fn handle_metrics<S: Store>(engine: &CourierEngine<S>) -> CourierResponse {
+    CourierResponse::ok(engine.metrics())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,9 +281,15 @@ mod tests {
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
-            .await
-            .unwrap();
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Some(Arc::new(MockDecryptor)),
+            None,
+            None,
+            shroudb_courier_engine::PolicyMode::Open,
+        )
+        .await
+        .unwrap();
         engine.register_adapter(
             shroudb_courier_core::ChannelType::Email,
             Arc::new(MockAdapter),
@@ -271,7 +321,7 @@ mod tests {
         let resp = dispatch(&engine, CourierCommand::CommandList, None).await;
         assert!(resp.is_ok());
         if let CourierResponse::Ok(v) = resp {
-            assert_eq!(v["count"], 10);
+            assert_eq!(v["count"], 13);
         }
     }
 
@@ -490,6 +540,151 @@ mod tests {
                 "error should mention access denied, got: {msg}"
             ),
             _ => panic!("expected error response"),
+        }
+    }
+
+    // ── Delivery persistence (LOW-23) ─────────────────────────────
+
+    #[tokio::test]
+    async fn test_dispatch_delivery_list_after_deliver() {
+        let engine = create_engine().await;
+
+        let create_ch = CourierCommand::ChannelCreate {
+            name: "dl-hook".into(),
+            channel_type: "webhook".into(),
+            config_json: "{}".into(),
+        };
+        dispatch(&engine, create_ch, None).await;
+
+        let deliver = CourierCommand::Deliver {
+            request_json:
+                r#"{"channel":"dl-hook","recipient":"enc:https://example.com","body":"test"}"#
+                    .into(),
+        };
+        let resp = dispatch(&engine, deliver, None).await;
+        assert!(resp.is_ok());
+
+        // Extract delivery_id from the receipt
+        let delivery_id = if let CourierResponse::Ok(v) = &resp {
+            v["delivery_id"].as_str().unwrap().to_string()
+        } else {
+            panic!("expected Ok response");
+        };
+
+        // DELIVERY GET should return the receipt
+        let get_cmd = CourierCommand::DeliveryGet {
+            id: delivery_id.clone(),
+        };
+        let resp = dispatch(&engine, get_cmd, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = &resp {
+            assert_eq!(v["delivery_id"].as_str().unwrap(), delivery_id);
+            assert_eq!(v["status"].as_str().unwrap(), "delivered");
+        }
+
+        // DELIVERY LIST should include the receipt
+        let list_cmd = CourierCommand::DeliveryList {
+            channel: None,
+            limit: 100,
+        };
+        let resp = dispatch(&engine, list_cmd, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = &resp {
+            assert!(v["count"].as_u64().unwrap() >= 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_delivery_list_filtered_by_channel() {
+        let engine = create_engine().await;
+
+        // Create two channels
+        for name in ["ch-a", "ch-b"] {
+            let cmd = CourierCommand::ChannelCreate {
+                name: name.into(),
+                channel_type: "webhook".into(),
+                config_json: "{}".into(),
+            };
+            dispatch(&engine, cmd, None).await;
+        }
+
+        // Deliver to ch-a
+        let deliver = CourierCommand::Deliver {
+            request_json:
+                r#"{"channel":"ch-a","recipient":"enc:https://example.com","body":"hello"}"#.into(),
+        };
+        dispatch(&engine, deliver, None).await;
+
+        // Deliver to ch-b
+        let deliver = CourierCommand::Deliver {
+            request_json:
+                r#"{"channel":"ch-b","recipient":"enc:https://example.com","body":"world"}"#.into(),
+        };
+        dispatch(&engine, deliver, None).await;
+
+        // List filtered by ch-a
+        let list_cmd = CourierCommand::DeliveryList {
+            channel: Some("ch-a".into()),
+            limit: 100,
+        };
+        let resp = dispatch(&engine, list_cmd, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = &resp {
+            let receipts = v["receipts"].as_array().unwrap();
+            for r in receipts {
+                assert_eq!(r["channel"].as_str().unwrap(), "mock");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_delivery_get_nonexistent() {
+        let engine = create_engine().await;
+        let cmd = CourierCommand::DeliveryGet {
+            id: "nonexistent-id".into(),
+        };
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok());
+    }
+
+    // ── Metrics (LOW-24) ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_dispatch_metrics() {
+        let engine = create_engine().await;
+
+        // Initial metrics should be zero
+        let resp = dispatch(&engine, CourierCommand::Metrics, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = &resp {
+            assert_eq!(v["total_deliveries"].as_u64().unwrap(), 0);
+            assert_eq!(v["delivered"].as_u64().unwrap(), 0);
+            assert_eq!(v["failed"].as_u64().unwrap(), 0);
+        }
+
+        // Create a channel and deliver
+        let create_ch = CourierCommand::ChannelCreate {
+            name: "metrics-test".into(),
+            channel_type: "webhook".into(),
+            config_json: "{}".into(),
+        };
+        dispatch(&engine, create_ch, None).await;
+
+        let deliver = CourierCommand::Deliver {
+            request_json:
+                r#"{"channel":"metrics-test","recipient":"enc:https://example.com","body":"test"}"#
+                    .into(),
+        };
+        dispatch(&engine, deliver, None).await;
+
+        // Metrics should now reflect the delivery
+        let resp = dispatch(&engine, CourierCommand::Metrics, None).await;
+        assert!(resp.is_ok());
+        if let CourierResponse::Ok(v) = &resp {
+            assert_eq!(v["total_deliveries"].as_u64().unwrap(), 1);
+            assert_eq!(v["delivered"].as_u64().unwrap(), 1);
+            assert_eq!(v["failed"].as_u64().unwrap(), 0);
+            assert!(v["per_channel"].as_object().is_some());
         }
     }
 }

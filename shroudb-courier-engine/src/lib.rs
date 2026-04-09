@@ -4,4 +4,5 @@ pub mod delivery;
 pub mod engine;
 
 pub use capabilities::{Decryptor, DeliveryAdapter};
-pub use engine::CourierEngine;
+pub use delivery::RetryConfig;
+pub use engine::{CourierEngine, PolicyMode};
