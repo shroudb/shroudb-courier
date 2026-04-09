@@ -162,6 +162,7 @@ impl<S: Store> CourierEngine<S> {
         let mut event = Event::new(
             AuditEngine::Courier,
             operation.to_string(),
+            "channel".to_string(),
             resource.to_string(),
             result,
             actor.unwrap_or("anonymous").to_string(),
