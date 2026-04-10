@@ -142,10 +142,18 @@ async fn main() -> anyhow::Result<()> {
     // Shutdown
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+    let tls_acceptor = cfg
+        .server
+        .tls
+        .as_ref()
+        .map(shroudb_server_tcp::build_tls_acceptor)
+        .transpose()
+        .context("failed to build TLS acceptor")?;
+
     let tcp_engine = Arc::clone(&engine);
     let tcp_tv = token_validator.clone();
     let tcp_handle = tokio::spawn(async move {
-        tcp::run_tcp(listener, tcp_engine, tcp_tv, shutdown_rx).await;
+        tcp::run_tcp(listener, tcp_engine, tcp_tv, shutdown_rx, tls_acceptor).await;
     });
 
     // Banner (Courier has extra cipher line)

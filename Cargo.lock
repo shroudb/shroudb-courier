@@ -1631,6 +1631,7 @@ version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
 dependencies = [
+ "aws-lc-rs",
  "log",
  "once_cell",
  "ring",
@@ -1656,6 +1657,7 @@ version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
+ "aws-lc-rs",
  "ring",
  "rustls-pki-types",
  "untrusted 0.9.0",
@@ -1855,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-cli"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -1866,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-client"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -1876,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -1886,7 +1888,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-engine"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "dashmap",
  "serde",
@@ -1907,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-protocol"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -1923,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-server"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -1947,6 +1949,7 @@ dependencies = [
  "shroudb-store",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "toml",
  "tracing",
  "uuid",
@@ -2003,14 +2006,19 @@ dependencies = [
 
 [[package]]
 name = "shroudb-server-tcp"
-version = "0.1.2"
+version = "0.2.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "33304baff81283cda04f6d3fef293495a72e7156310289ed54a4ed189e4ab3c7"
+checksum = "6726004b1af9bfb9875a2e463a034d03185929a9de75996b0d71a8ca98c16289"
 dependencies = [
+ "anyhow",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
  "serde_json",
  "shroudb-acl",
  "shroudb-protocol-wire",
  "tokio",
+ "tokio-rustls",
  "tracing",
 ]
 
