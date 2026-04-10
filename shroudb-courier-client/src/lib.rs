@@ -11,19 +11,29 @@ pub struct CourierClient {
 }
 
 impl CourierClient {
+    /// Connect directly to a standalone Courier server.
     pub async fn connect(addr: &str) -> Result<Self, ClientError> {
         let conn = Connection::connect(addr).await?;
         Ok(Self { conn })
     }
 
+    /// Connect to a Courier engine through a Moat gateway.
+    ///
+    /// Commands are automatically prefixed with `COURIER` for Moat routing.
+    /// Meta-commands (AUTH, HEALTH, PING) are sent without prefix.
+    pub async fn connect_moat(addr: &str) -> Result<Self, ClientError> {
+        let conn = Connection::connect_moat(addr).await?;
+        Ok(Self { conn })
+    }
+
     pub async fn auth(&mut self, token: &str) -> Result<(), ClientError> {
-        let resp = self.conn.send_command(&["AUTH", token]).await?;
+        let resp = self.conn.send_meta_command(&["AUTH", token]).await?;
         check_status(&resp)?;
         Ok(())
     }
 
     pub async fn health(&mut self) -> Result<Value, ClientError> {
-        self.conn.send_command(&["HEALTH"]).await
+        self.conn.send_meta_command(&["HEALTH"]).await
     }
 
     // --- Channel operations ---
