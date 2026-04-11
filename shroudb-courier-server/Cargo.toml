@@ -17,6 +17,7 @@ shroudb-courier-engine = { workspace = true }
 shroudb-courier-protocol = { workspace = true }
 shroudb-store = { workspace = true }
 shroudb-storage = { workspace = true }
+shroudb-client = { workspace = true }
 shroudb-acl = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }

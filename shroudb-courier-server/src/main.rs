@@ -9,9 +9,10 @@ use anyhow::Context;
 use clap::Parser;
 use shroudb_courier_core::{Channel, ChannelType};
 use shroudb_courier_engine::CourierEngine;
+use shroudb_store::Store;
 use tokio::net::TcpListener;
 
-use crate::config::load_config;
+use crate::config::{CourierServerConfig, load_config};
 
 #[derive(Parser)]
 #[command(
@@ -47,24 +48,41 @@ async fn main() -> anyhow::Result<()> {
     }
     cfg.server.log_level = cli.log_level.clone();
 
-    // Store mode validation
-    if cfg.store.mode == "remote" {
-        anyhow::bail!(
-            "remote store mode not yet implemented (uri: {:?})",
-            cfg.store.uri
-        );
-    }
-
     // Bootstrap: logging + core dumps + key source
     let key_source = shroudb_server_bootstrap::bootstrap(&cfg.server.log_level);
 
-    // Storage
-    let data_dir = std::path::PathBuf::from(&cfg.store.data_dir);
-    let storage = shroudb_server_bootstrap::open_storage(&data_dir, key_source.as_ref())
-        .await
-        .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "courier"));
+    // Store: embedded or remote
+    match cfg.store.mode.as_str() {
+        "embedded" => {
+            let data_dir = std::path::PathBuf::from(&cfg.store.data_dir);
+            let storage = shroudb_server_bootstrap::open_storage(&data_dir, key_source.as_ref())
+                .await
+                .context("failed to open storage engine")?;
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "courier"));
+            run_server(cfg, store).await
+        }
+        "remote" => {
+            let uri = cfg
+                .store
+                .uri
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("remote mode requires store.uri"))?;
+            tracing::info!(uri, "connecting to remote store");
+            let store = Arc::new(
+                shroudb_client::RemoteStore::connect(uri)
+                    .await
+                    .context("failed to connect to remote store")?,
+            );
+            run_server(cfg, store).await
+        }
+        other => anyhow::bail!("unknown store mode: {other}"),
+    }
+}
 
+async fn run_server<S: Store + 'static>(
+    cfg: CourierServerConfig,
+    store: Arc<S>,
+) -> anyhow::Result<()> {
     // Cipher decryptor
     let decryptor: Option<Arc<dyn shroudb_courier_engine::Decryptor>> =
         if let Some(ref cipher_cfg) = cfg.cipher {

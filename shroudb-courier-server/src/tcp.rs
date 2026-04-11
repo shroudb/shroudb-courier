@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,13 +10,14 @@ use shroudb_courier_protocol::dispatch::dispatch;
 use shroudb_courier_protocol::response::CourierResponse;
 use shroudb_protocol_wire::Resp3Frame;
 use shroudb_server_tcp::ServerProtocol;
+use shroudb_store::Store;
 
-pub struct CourierProtocol;
+pub struct CourierProtocol<S>(PhantomData<S>);
 
-impl ServerProtocol for CourierProtocol {
+impl<S: Store + 'static> ServerProtocol for CourierProtocol<S> {
     type Command = CourierCommand;
     type Response = CourierResponse;
-    type Engine = CourierEngine<shroudb_storage::EmbeddedStore>;
+    type Engine = CourierEngine<S>;
 
     fn engine_name(&self) -> &str {
         "courier"
@@ -65,9 +67,9 @@ impl ServerProtocol for CourierProtocol {
     }
 }
 
-pub async fn run_tcp(
+pub async fn run_tcp<S: Store + 'static>(
     listener: tokio::net::TcpListener,
-    engine: Arc<CourierEngine<shroudb_storage::EmbeddedStore>>,
+    engine: Arc<CourierEngine<S>>,
     token_validator: Option<Arc<dyn TokenValidator>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -75,7 +77,7 @@ pub async fn run_tcp(
     shroudb_server_tcp::run_tcp_tls(
         listener,
         engine,
-        Arc::new(CourierProtocol),
+        Arc::new(CourierProtocol::<S>(PhantomData)),
         token_validator,
         shutdown_rx,
         tls_acceptor,
