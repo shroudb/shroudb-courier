@@ -1877,9 +1877,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.7.1"
+version = "1.7.2"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "1abb730994e722ae1c18f1d0f40548f54ed6f6396c9af97daba6294a9ebce3a5"
+checksum = "72cfd74388c0757112a14108920da7828ce7944abcda91d82d5f7b2409229d11"
 dependencies = [
  "serde",
  "serde_json",
@@ -1889,9 +1889,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-client"
-version = "1.4.14"
+version = "1.4.15"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "05eab482f0fae664415b537537fac72dfc0e1fc674d5c3a55d786987eff58809"
+checksum = "52458328ac771aa26183265ea9270715900361f4372d2052f368e688b8638199"
 dependencies = [
  "serde",
  "serde_json",
@@ -1901,9 +1901,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-client"
-version = "1.0.11"
+version = "1.0.12"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "a549c3c304eb5fdceb62f2e66262938372197e96c7a6e4e3ff2ac0c743e6e94d"
+checksum = "05f6b694f863dfd4420e95f1654fe858c2ee5e509c2f03d36abe28198dbec621"
 dependencies = [
  "rustls",
  "rustls-native-certs",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-cli"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "anyhow",
  "clap",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-client"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -1950,7 +1950,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -1960,7 +1960,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-engine"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "dashmap",
  "serde",
@@ -1981,7 +1981,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-protocol"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -1997,7 +1997,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-server"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "anyhow",
  "base64",
