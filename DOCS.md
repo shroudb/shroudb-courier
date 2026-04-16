@@ -160,6 +160,38 @@ Delivery request format:
 
 **Priority:** `body_encrypted` > `body`. Callers are responsible for rendering their own message content.
 
+### NOTIFY_EVENT
+
+```
+NOTIFY_EVENT <channel> <subject> <body>
+```
+
+Trigger a notification on a pre-configured channel. The channel must have a `default_recipient` set; otherwise this returns an error. Intended for engine schedulers (e.g. Cipher key rotation, Forge cert expiry alerts).
+
+### DELIVERY GET
+
+```
+DELIVERY GET <id>
+```
+
+Retrieve a persisted delivery receipt by its UUID. Returns `delivery_id`, `channel`, `status`, `delivered_at`, and `error` if the delivery failed.
+
+### DELIVERY LIST
+
+```
+DELIVERY LIST [CHANNEL <name>] [LIMIT <n>]
+```
+
+List recent delivery receipts. Optional `CHANNEL` filter restricts results to a single channel. `LIMIT` defaults to 100.
+
+### METRICS
+
+```
+METRICS
+```
+
+Returns delivery counters: `total_deliveries`, `delivered`, `failed`, and a `per_channel` breakdown.
+
 ### AUTH / HEALTH / PING / COMMAND LIST
 
 Standard operational commands following the ShrouDB engine pattern.
@@ -169,10 +201,11 @@ Standard operational commands following the ShrouDB engine pattern.
 | Command | Requirement |
 |---------|-------------|
 | AUTH, HEALTH, PING, COMMAND LIST | None |
-| CHANNEL LIST | None |
+| CHANNEL LIST, METRICS | None |
 | CHANNEL CREATE/DELETE | Admin |
+| DELIVERY GET/LIST | Admin |
 | CHANNEL GET | Namespace Read (`courier.{name}.*`) |
-| DELIVER | Namespace Write (`courier.{channel}.*`) |
+| DELIVER, NOTIFY_EVENT | Namespace Write (`courier.{channel}.*`) |
 
 ## CLI Usage
 

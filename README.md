@@ -71,11 +71,15 @@ channel_type = "webhook"
 
 | Command | Description |
 |---------|-------------|
-| `CHANNEL CREATE <name> <type> <json>` | Create a delivery channel |
+| `CHANNEL CREATE <name> <type> <config_json>` | Create a delivery channel |
 | `CHANNEL GET <name>` | Get channel configuration |
 | `CHANNEL LIST` | List all channels |
 | `CHANNEL DELETE <name>` | Delete a channel |
 | `DELIVER <json>` | Decrypt and deliver a message |
+| `NOTIFY_EVENT <channel> <subject> <body>` | Trigger a notification on a pre-configured channel |
+| `DELIVERY GET <id>` | Get a delivery receipt by ID |
+| `DELIVERY LIST [CHANNEL <name>] [LIMIT <n>]` | List delivery receipts |
+| `METRICS` | Get delivery metrics |
 | `HEALTH` | Server health check |
 | `PING` | Connectivity check |
 | `AUTH <token>` | Authenticate connection |
