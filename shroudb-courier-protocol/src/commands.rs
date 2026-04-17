@@ -36,6 +36,11 @@ pub enum CourierCommand {
     Health,
     Ping,
     CommandList,
+    /// Engine identity handshake. Pre-auth; returns engine name, version,
+    /// wire protocol, supported commands, and capability tags so a client
+    /// can detect SDK/engine version mismatches before issuing any real
+    /// command.
+    Hello,
 }
 
 impl CourierCommand {
@@ -45,6 +50,7 @@ impl CourierCommand {
             | CourierCommand::Health
             | CourierCommand::Ping
             | CourierCommand::CommandList
+            | CourierCommand::Hello
             | CourierCommand::Metrics
             | CourierCommand::ChannelList => AclRequirement::None,
 
@@ -214,6 +220,7 @@ pub fn parse_command(args: &[&str]) -> Result<CourierCommand, String> {
         "METRICS" => Ok(CourierCommand::Metrics),
         "HEALTH" => Ok(CourierCommand::Health),
         "PING" => Ok(CourierCommand::Ping),
+        "HELLO" => Ok(CourierCommand::Hello),
 
         "COMMAND" => {
             if args.len() >= 2 && args[1].to_uppercase() == "LIST" {
@@ -326,6 +333,12 @@ mod tests {
     fn test_parse_ping() {
         let cmd = parse_command(&["PING"]).unwrap();
         assert!(matches!(cmd, CourierCommand::Ping));
+    }
+
+    #[test]
+    fn test_parse_hello() {
+        let cmd = parse_command(&["HELLO"]).unwrap();
+        assert!(matches!(cmd, CourierCommand::Hello));
     }
 
     #[test]

@@ -156,6 +156,12 @@ description = "List available commands"
 acl = "none"
 response = { commands = "array", count = "integer" }
 
+[commands.HELLO]
+syntax = "HELLO"
+description = "Engine identity handshake — returns engine name, version, wire protocol, supported commands, and capability tags. Pre-auth; clients issue this on connect to verify they are talking to the expected engine and version."
+acl = "none"
+response = { engine = "string", version = "string", protocol = "string", commands = "array", capabilities = "array" }
+
 # --- Types ---
 
 [types.channel_name]

@@ -1,9 +1,27 @@
 use shroudb_acl::AuthContext;
 use shroudb_courier_engine::CourierEngine;
+use shroudb_protocol_wire::WIRE_PROTOCOL;
 use shroudb_store::Store;
 
 use crate::commands::CourierCommand;
 use crate::response::CourierResponse;
+
+const SUPPORTED_COMMANDS: &[&str] = &[
+    "AUTH",
+    "CHANNEL CREATE",
+    "CHANNEL GET",
+    "CHANNEL LIST",
+    "CHANNEL DELETE",
+    "DELIVER",
+    "DELIVERY GET",
+    "DELIVERY LIST",
+    "NOTIFY_EVENT",
+    "METRICS",
+    "HEALTH",
+    "PING",
+    "COMMAND LIST",
+    "HELLO",
+];
 
 pub async fn dispatch<S: Store>(
     engine: &CourierEngine<S>,
@@ -58,12 +76,16 @@ pub async fn dispatch<S: Store>(
         CourierCommand::Ping => CourierResponse::ok(serde_json::json!("PONG")),
 
         CourierCommand::CommandList => CourierResponse::ok(serde_json::json!({
-            "commands": [
-                "AUTH", "CHANNEL CREATE", "CHANNEL GET", "CHANNEL LIST", "CHANNEL DELETE",
-                "DELIVER", "DELIVERY GET", "DELIVERY LIST", "NOTIFY_EVENT",
-                "METRICS", "HEALTH", "PING", "COMMAND LIST"
-            ],
-            "count": 13
+            "commands": SUPPORTED_COMMANDS,
+            "count": SUPPORTED_COMMANDS.len(),
+        })),
+
+        CourierCommand::Hello => CourierResponse::ok(serde_json::json!({
+            "engine": "courier",
+            "version": env!("CARGO_PKG_VERSION"),
+            "protocol": WIRE_PROTOCOL,
+            "commands": SUPPORTED_COMMANDS,
+            "capabilities": Vec::<&str>::new(),
         })),
     }
 }
@@ -321,7 +343,7 @@ mod tests {
         let resp = dispatch(&engine, CourierCommand::CommandList, None).await;
         assert!(resp.is_ok());
         if let CourierResponse::Ok(v) = resp {
-            assert_eq!(v["count"], 13);
+            assert_eq!(v["count"], 14);
         }
     }
 
