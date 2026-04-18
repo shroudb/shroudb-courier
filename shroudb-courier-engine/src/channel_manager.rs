@@ -104,15 +104,19 @@ impl<S: Store> ChannelManager<S> {
         Ok(())
     }
 
-    pub async fn seed_if_absent(&self, channel: Channel) -> Result<(), CourierError> {
+    /// Seed a channel if it does not already exist in the cache. Returns
+    /// `true` when a new channel was seeded, `false` when an existing
+    /// channel made the seed a no-op. Callers use the return value to
+    /// decide whether to emit a Chronicle audit event.
+    pub async fn seed_if_absent(&self, channel: Channel) -> Result<bool, CourierError> {
         if self.cache.contains_key(&channel.name) {
             tracing::debug!(name = %channel.name, "channel already exists, skipping seed");
-            return Ok(());
+            return Ok(false);
         }
         self.create(channel.clone())?;
         self.save(&channel).await?;
         tracing::info!(name = %channel.name, "seeded channel from config");
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -241,11 +245,13 @@ mod tests {
         mgr.init().await.unwrap();
 
         let ch = test_channel("seeded");
-        mgr.seed_if_absent(ch.clone()).await.unwrap();
+        let first = mgr.seed_if_absent(ch.clone()).await.unwrap();
+        assert!(first, "first seed must report that it created the channel");
         assert!(mgr.get("seeded").is_ok());
 
         // Second seed is a no-op
-        mgr.seed_if_absent(ch).await.unwrap();
+        let second = mgr.seed_if_absent(ch).await.unwrap();
+        assert!(!second, "second seed must report that it skipped");
         assert_eq!(mgr.list().len(), 1);
     }
 

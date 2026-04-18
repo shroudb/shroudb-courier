@@ -505,8 +505,21 @@ impl<S: Store> CourierEngine<S> {
 
     // --- Seeding ---
 
+    /// Seed a channel from static configuration if it does not already
+    /// exist. Unlike `channel_create`, this path intentionally skips
+    /// policy evaluation (startup seeding has no authenticated caller) —
+    /// but it MUST still emit a Chronicle event when a channel is
+    /// actually persisted, so operators can distinguish seeded
+    /// configuration from runtime-created channels in the audit log.
     pub async fn seed_channel(&self, channel: Channel) -> Result<(), CourierError> {
-        self.channel_manager.seed_if_absent(channel).await
+        let start = Instant::now();
+        let name = channel.name.clone();
+        let seeded = self.channel_manager.seed_if_absent(channel).await?;
+        if seeded {
+            self.emit_audit_event("CHANNEL_SEED", &name, EventResult::Ok, None, start)
+                .await?;
+        }
+        Ok(())
     }
 }
 
