@@ -5,6 +5,7 @@ use shroudb_chronicle_core::ops::ChronicleOps;
 use shroudb_courier_core::{
     Channel, ChannelType, CourierError, DeliveryReceipt, DeliveryRequest, DeliveryStatus,
 };
+use shroudb_server_bootstrap::Capability;
 use shroudb_store::Store;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,23 +41,29 @@ pub struct DeliveryMetrics {
 pub struct CourierEngine<S: Store> {
     store: Arc<S>,
     channel_manager: ChannelManager<S>,
-    decryptor: Option<Arc<dyn Decryptor>>,
+    decryptor: Capability<Arc<dyn Decryptor>>,
     adapters: DashMap<ChannelType, Arc<dyn DeliveryAdapter>>,
-    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+    policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
     policy_mode: PolicyMode,
     retry_config: RetryConfig,
-    chronicle: Option<Arc<dyn ChronicleOps>>,
+    chronicle: Capability<Arc<dyn ChronicleOps>>,
     metrics: DeliveryMetrics,
     /// Per-channel delivery counts (channel_name → count).
     channel_metrics: DashMap<String, AtomicU64>,
 }
 
 impl<S: Store> CourierEngine<S> {
+    /// Create a new Courier engine.
+    ///
+    /// Every capability slot is explicit: `Capability::Enabled(...)`,
+    /// `Capability::DisabledForTests`, or
+    /// `Capability::DisabledWithJustification("<reason>")`. Absence is
+    /// never silent — operators must name why they're opting out.
     pub async fn new(
         store: Arc<S>,
-        decryptor: Option<Arc<dyn Decryptor>>,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
+        decryptor: Capability<Arc<dyn Decryptor>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CourierError> {
         Self::new_with_policy_mode(
             store,
@@ -70,9 +77,9 @@ impl<S: Store> CourierEngine<S> {
 
     pub async fn new_with_policy_mode(
         store: Arc<S>,
-        decryptor: Option<Arc<dyn Decryptor>>,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
+        decryptor: Capability<Arc<dyn Decryptor>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
         policy_mode: PolicyMode,
     ) -> Result<Self, CourierError> {
         let channel_manager = ChannelManager::new(store.clone());
@@ -107,7 +114,7 @@ impl<S: Store> CourierEngine<S> {
         action: &str,
         actor: Option<&str>,
     ) -> Result<(), CourierError> {
-        let Some(evaluator) = &self.policy_evaluator else {
+        let Some(evaluator) = self.policy_evaluator.as_ref() else {
             // Fail-closed: no evaluator configured means deny unless explicitly open
             if self.policy_mode == PolicyMode::Open {
                 return Ok(());
@@ -156,7 +163,7 @@ impl<S: Store> CourierEngine<S> {
         actor: Option<&str>,
         start: Instant,
     ) -> Result<(), CourierError> {
-        let Some(chronicle) = &self.chronicle else {
+        let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
         };
         let mut event = Event::new(
@@ -238,7 +245,7 @@ impl<S: Store> CourierEngine<S> {
 
         let result = execute_delivery_with_retry(
             &request,
-            self.decryptor.as_deref(),
+            self.decryptor.as_ref().map(|arc| arc.as_ref()),
             adapter.as_ref(),
             &self.retry_config,
         )
@@ -458,9 +465,9 @@ mod tests {
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let engine = CourierEngine::new_with_policy_mode(
             store,
-            Some(Arc::new(MockDecryptor)),
-            None,
-            None,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
             PolicyMode::Open,
         )
         .await
@@ -705,9 +712,9 @@ mod tests {
         let store = shroudb_storage::test_util::create_test_store("courier-policy-test").await;
         let engine = CourierEngine::new(
             store,
-            Some(Arc::new(MockDecryptor)),
-            Some(Arc::new(DenyAll)),
-            None,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(Arc::new(DenyAll)),
+            Capability::DisabledForTests,
         )
         .await
         .unwrap();
@@ -734,9 +741,14 @@ mod tests {
     async fn no_evaluator_default_closed_denies() {
         let store = shroudb_storage::test_util::create_test_store("courier-closed-test").await;
         // Default PolicyMode::Closed, no evaluator
-        let engine = CourierEngine::new(store, Some(Arc::new(MockDecryptor)), None, None)
-            .await
-            .unwrap();
+        let engine = CourierEngine::new(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap();
 
         let ch = Channel {
             name: "test".into(),
@@ -761,9 +773,9 @@ mod tests {
         let store = shroudb_storage::test_util::create_test_store("courier-open-test").await;
         let engine = CourierEngine::new_with_policy_mode(
             store,
-            Some(Arc::new(MockDecryptor)),
-            None,
-            None,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
             PolicyMode::Open,
         )
         .await
@@ -817,9 +829,9 @@ mod tests {
         // Default closed mode, but evaluator IS present — should evaluate normally
         let engine = CourierEngine::new(
             store,
-            Some(Arc::new(MockDecryptor)),
-            Some(Arc::new(PermitAll)),
-            None,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(Arc::new(PermitAll)),
+            Capability::DisabledForTests,
         )
         .await
         .unwrap();
@@ -928,6 +940,437 @@ mod tests {
     }
 
     // ── Metrics (LOW-24) ──────────────────────────────────────────
+
+    // ── AUDIT 2026-04-17: failing debt tests (hard ratchet, no #[ignore]) ──
+    //
+    // These encode CLAUDE.md-required behaviours that the engine currently
+    // violates. They MUST stay failing until the listed findings are fixed.
+
+    /// Recording double for ChronicleOps — captures every emitted Event so
+    /// tests can assert over (operation, result, actor).
+    #[derive(Default)]
+    struct RecordingChronicle {
+        events: std::sync::Mutex<Vec<shroudb_chronicle_core::event::Event>>,
+    }
+    impl RecordingChronicle {
+        fn events(&self) -> Vec<shroudb_chronicle_core::event::Event> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+    impl shroudb_chronicle_core::ops::ChronicleOps for RecordingChronicle {
+        fn record(
+            &self,
+            event: shroudb_chronicle_core::event::Event,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            let mut guard = self.events.lock().unwrap();
+            guard.push(event);
+            Box::pin(async { Ok(()) })
+        }
+        fn record_batch(
+            &self,
+            events: Vec<shroudb_chronicle_core::event::Event>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            let mut guard = self.events.lock().unwrap();
+            guard.extend(events);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// Adapter that always fails — used to prove failed deliveries should
+    /// audit as `EventResult::Error`, not `EventResult::Ok`.
+    struct AlwaysFailAdapter;
+    impl DeliveryAdapter for AlwaysFailAdapter {
+        fn deliver<'a>(
+            &'a self,
+            _recipient: &'a str,
+            _message: &'a RenderedMessage,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<DeliveryReceipt, CourierError>> + Send + 'a,
+            >,
+        > {
+            Box::pin(async { Err(CourierError::DeliveryFailed("simulated failure".into())) })
+        }
+    }
+
+    fn permit_evaluator() -> std::sync::Arc<dyn shroudb_acl::PolicyEvaluator> {
+        use shroudb_acl::{
+            AclError, PolicyDecision, PolicyEffect, PolicyEvaluator,
+            PolicyRequest as AclPolicyRequest,
+        };
+        struct PermitAll;
+        impl PolicyEvaluator for PermitAll {
+            fn evaluate(
+                &self,
+                _request: &AclPolicyRequest,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<PolicyDecision, AclError>> + Send + '_>,
+            > {
+                Box::pin(async {
+                    Ok(PolicyDecision {
+                        effect: PolicyEffect::Permit,
+                        matched_policy: None,
+                        token: None,
+                        cache_until: None,
+                    })
+                })
+            }
+        }
+        std::sync::Arc::new(PermitAll)
+    }
+
+    /// F-courier-1 (HIGH): on a failed delivery (all retries exhausted),
+    /// `deliver()` currently records a Chronicle event with
+    /// `EventResult::Ok` even though the receipt status is `Failed`.
+    /// This exactly mirrors the Cipher audit bug: the audit trail lies
+    /// about operation outcomes.
+    #[tokio::test]
+    async fn debt_1_failed_delivery_must_audit_as_error() {
+        let store =
+            shroudb_storage::test_util::create_test_store("courier-debt-1-failed-audit").await;
+        let chronicle = Arc::new(RecordingChronicle::default());
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(permit_evaluator()),
+            Capability::Enabled(chronicle.clone()),
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(ChannelType::Webhook, Arc::new(AlwaysFailAdapter));
+
+        let ch = Channel {
+            name: "fail-ch".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let req = DeliveryRequest {
+            channel: "fail-ch".into(),
+            recipient: "enc:https://example.com/hook".into(),
+            subject: None,
+            body: Some("test".into()),
+            body_encrypted: None,
+            content_type: None,
+        };
+        let receipt = engine.deliver(req).await.unwrap();
+        assert_eq!(receipt.status, DeliveryStatus::Failed);
+
+        // The DELIVER event must reflect the real outcome.
+        let deliver_events: Vec<_> = chronicle
+            .events()
+            .into_iter()
+            .filter(|e| e.operation == "DELIVER")
+            .collect();
+        assert_eq!(
+            deliver_events.len(),
+            1,
+            "expected exactly one DELIVER audit event"
+        );
+        assert_eq!(
+            deliver_events[0].result,
+            shroudb_chronicle_core::event::EventResult::Error,
+            "failed delivery must audit as Error (was Ok — audit trail is lying)",
+        );
+    }
+
+    /// F-courier-2 (HIGH): Server main.rs passes `None` for the chronicle
+    /// capability even though the engine declares a `chronicle` parameter
+    /// and all engine ops call `emit_audit_event`. Exercising the public
+    /// constructor signature with `chronicle = None` and then observing
+    /// that a freshly recorded-double set up here never sees events is
+    /// impossible because the engine has no hook to inject one later.
+    /// What we CAN encode is the stronger invariant: the DELIVER audit
+    /// event MUST carry the authenticated actor, not the hardcoded
+    /// "anonymous" fallback. Today `deliver()` passes `None` to
+    /// `emit_audit_event` so the recorded actor is always "anonymous" —
+    /// the actor is never threaded through the engine.
+    #[tokio::test]
+    async fn debt_2_deliver_audit_must_record_caller_actor() {
+        let store =
+            shroudb_storage::test_util::create_test_store("courier-debt-2-actor-thread").await;
+        let chronicle = Arc::new(RecordingChronicle::default());
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(permit_evaluator()),
+            Capability::Enabled(chronicle.clone()),
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(
+            ChannelType::Webhook,
+            Arc::new(MockAdapter {
+                channel_type: ChannelType::Webhook,
+            }),
+        );
+
+        let ch = Channel {
+            name: "actor-ch".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        // Today there is no deliver_as(actor, ...) / no actor parameter on
+        // `deliver()` — the engine drops the caller identity on the floor.
+        // This test asserts the behaviour we want: if you invoke deliver
+        // you MUST be able to pass an actor and it MUST land in the audit
+        // event. Since today the parameter does not exist we drive the
+        // existing API and assert the CHANNEL_CREATE event carried an
+        // actor — that already fails the ratchet because `channel_create`
+        // also hardcodes `None`.
+        let events = chronicle.events();
+        let create_event = events
+            .iter()
+            .find(|e| e.operation == "CHANNEL_CREATE")
+            .expect("expected CHANNEL_CREATE audit event");
+        assert_ne!(
+            create_event.actor, "anonymous",
+            "CHANNEL_CREATE must carry the caller's actor; engine currently drops actor on the floor \
+             (same shape as the Sigil audit-actor bug)"
+        );
+    }
+
+    /// F-courier-3 (HIGH): The server main.rs constructs the engine with
+    /// `None` for BOTH `policy_evaluator` and `chronicle`. Default mode is
+    /// `PolicyMode::Closed`, which makes every policy check fail-closed —
+    /// that's intentional. But Chronicle being silently unwired means no
+    /// production deployment produces any audit events. This test asserts
+    /// that the set of Chronicle events emitted across a full operation
+    /// cycle is non-empty when a chronicle is wired, which today passes —
+    /// but also asserts that CHANNEL_CREATE, DELIVER, and CHANNEL_DELETE
+    /// all emit events. Today DELIVER audits only emit on success path
+    /// with `EventResult::Ok` even when the delivery failed (covered by
+    /// debt-1). Here we additionally demand that the DELIVER audit event's
+    /// `duration_ms` field is populated correctly — it currently uses
+    /// `start.elapsed()` only on the success path; the engine records it
+    /// but the delivery module does an unbounded sleep loop inside the
+    /// retry path that inflates duration. This test simply demands: if a
+    /// delivery succeeds, the audit event's `resource_id` matches the
+    /// channel name AND the recorded `resource_type` equals "channel".
+    /// Today `resource_type` is correct but other fields aren't exercised
+    /// — so what we ratchet is that the audit for a failed delivery
+    /// carries an error in `metadata` (it currently does not).
+    #[tokio::test]
+    async fn debt_3_failed_delivery_audit_must_carry_error_metadata() {
+        let store =
+            shroudb_storage::test_util::create_test_store("courier-debt-3-error-metadata").await;
+        let chronicle = Arc::new(RecordingChronicle::default());
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(permit_evaluator()),
+            Capability::Enabled(chronicle.clone()),
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(ChannelType::Webhook, Arc::new(AlwaysFailAdapter));
+
+        let ch = Channel {
+            name: "err-md".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        let req = DeliveryRequest {
+            channel: "err-md".into(),
+            recipient: "enc:https://example.com/hook".into(),
+            subject: None,
+            body: Some("x".into()),
+            body_encrypted: None,
+            content_type: None,
+        };
+        let _ = engine.deliver(req).await.unwrap();
+
+        let deliver_event = chronicle
+            .events()
+            .into_iter()
+            .find(|e| e.operation == "DELIVER")
+            .expect("DELIVER audit event missing");
+        assert!(
+            deliver_event.metadata.contains_key("error"),
+            "failed DELIVER audit must include error detail in metadata \
+             (today metadata is empty — attackers/operators can't tell failed \
+             deliveries from successful ones from Chronicle alone)"
+        );
+    }
+
+    /// F-courier-4 (MED): `NOTIFY_EVENT` ACL requirement is
+    /// `namespace write` but the engine's `notify_event()` method
+    /// BYPASSES policy check (it calls `deliver()` which checks policy
+    /// for `action="deliver"`, NOT `"notify_event"`). This means any
+    /// actor with `deliver` permission on a channel can also trigger
+    /// event notifications — the two permissions are conflated. Also,
+    /// notify_event hardcodes `None` actor into the downstream call,
+    /// meaning a subsequent Chronicle audit (if wired) will not carry
+    /// the calling actor for event notifications either. This test
+    /// wires a PolicyEvaluator that ONLY permits `deliver` and asserts
+    /// that `notify_event` requires a distinct `notify_event` action.
+    #[tokio::test]
+    async fn debt_4_notify_event_must_check_distinct_policy_action() {
+        use shroudb_acl::{
+            AclError, PolicyDecision, PolicyEffect, PolicyEvaluator,
+            PolicyRequest as AclPolicyRequest,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct DeliverOnlyEvaluator {
+            notify_evaluations: Arc<AtomicUsize>,
+        }
+        impl PolicyEvaluator for DeliverOnlyEvaluator {
+            fn evaluate(
+                &self,
+                request: &AclPolicyRequest,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<PolicyDecision, AclError>> + Send + '_>,
+            > {
+                let action = request.action.clone();
+                let counter = self.notify_evaluations.clone();
+                Box::pin(async move {
+                    if action == "notify_event" {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Permit anything — the test only checks what action got asked.
+                    Ok(PolicyDecision {
+                        effect: PolicyEffect::Permit,
+                        matched_policy: None,
+                        token: None,
+                        cache_until: None,
+                    })
+                })
+            }
+        }
+
+        let notify_count = Arc::new(AtomicUsize::new(0));
+        let evaluator = Arc::new(DeliverOnlyEvaluator {
+            notify_evaluations: notify_count.clone(),
+        });
+
+        let store =
+            shroudb_storage::test_util::create_test_store("courier-debt-4-notify-policy").await;
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(evaluator),
+            Capability::DisabledForTests,
+            PolicyMode::Closed,
+        )
+        .await
+        .unwrap();
+        engine.register_adapter(
+            ChannelType::Webhook,
+            Arc::new(MockAdapter {
+                channel_type: ChannelType::Webhook,
+            }),
+        );
+
+        let ch = Channel {
+            name: "alerts".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: Some("https://ops.example.com/hook".into()),
+        };
+        engine.channel_create(ch).await.unwrap();
+
+        engine
+            .notify_event("alerts", "subject", "body")
+            .await
+            .unwrap();
+
+        assert!(
+            notify_count.load(Ordering::Relaxed) >= 1,
+            "notify_event must ask the policy evaluator for a distinct \
+             `notify_event` action — today it only piggybacks on `deliver`, \
+             so an actor with delivery rights can trigger notifications \
+             via the schedule path with no separate authorisation"
+        );
+    }
+
+    /// F-courier-5 (MED): `seed_channel` is a public method that bypasses
+    /// both the policy evaluator and audit emission. That's the intended
+    /// semantic for startup seeding — but the method is not marked pub(crate)
+    /// or otherwise guarded, and there is no Chronicle trace that a seed
+    /// was performed. Operators have no way to distinguish seeded
+    /// channels from created ones in the audit log.
+    #[tokio::test]
+    async fn debt_5_seed_channel_must_emit_chronicle_event() {
+        let store =
+            shroudb_storage::test_util::create_test_store("courier-debt-5-seed-audit").await;
+        let chronicle = Arc::new(RecordingChronicle::default());
+        let engine = CourierEngine::new_with_policy_mode(
+            store,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::Enabled(permit_evaluator()),
+            Capability::Enabled(chronicle.clone()),
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+
+        let ch = Channel {
+            name: "seeded".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.seed_channel(ch).await.unwrap();
+
+        let seed_events: Vec<_> = chronicle
+            .events()
+            .into_iter()
+            .filter(|e| e.operation == "CHANNEL_SEED" || e.operation == "CHANNEL_CREATE")
+            .collect();
+        assert!(
+            !seed_events.is_empty(),
+            "seed_channel must emit a Chronicle event (today it silently bypasses audit)"
+        );
+    }
 
     #[tokio::test]
     async fn test_metrics_increment_on_delivery() {

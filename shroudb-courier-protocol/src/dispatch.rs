@@ -302,12 +302,13 @@ mod tests {
     }
 
     async fn create_engine() -> CourierEngine<EmbeddedStore> {
+        use shroudb_server_bootstrap::Capability;
         let store = shroudb_storage::test_util::create_test_store("courier-test").await;
         let engine = CourierEngine::new_with_policy_mode(
             store,
-            Some(Arc::new(MockDecryptor)),
-            None,
-            None,
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
             shroudb_courier_engine::PolicyMode::Open,
         )
         .await

@@ -20,4 +20,5 @@ tracing = { workspace = true }
 [dev-dependencies]
 shroudb-storage = { workspace = true, features = ["testing"] }
 shroudb-crypto = { workspace = true }
+shroudb-server-bootstrap = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }

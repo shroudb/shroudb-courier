@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 use shroudb_acl::ServerAuthConfig;
+use shroudb_engine_bootstrap::{AuditConfig, PolicyConfig};
 
 #[derive(Debug, Deserialize)]
 pub struct CourierServerConfig {
@@ -22,6 +23,12 @@ pub struct CourierServerConfig {
     /// Optional HMAC-SHA256 signing secret for webhook deliveries.
     /// When set, each webhook POST includes an `X-ShrouDB-Signature` header.
     pub webhook_signing_secret: Option<String>,
+    /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
+    #[serde(default)]
+    pub audit: Option<AuditConfig>,
+    /// Policy (Sentry) capability slot. Same contract.
+    #[serde(default)]
+    pub policy: Option<PolicyConfig>,
 }
 
 fn default_policy_mode() -> String {
@@ -113,6 +120,8 @@ pub fn load_config(path: Option<&str>) -> anyhow::Result<CourierServerConfig> {
             channels: HashMap::new(),
             policy_mode: default_policy_mode(),
             webhook_signing_secret: None,
+            audit: None,
+            policy: None,
         }),
     }
 }

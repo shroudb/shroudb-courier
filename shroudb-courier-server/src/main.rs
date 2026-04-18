@@ -58,8 +58,11 @@ async fn main() -> anyhow::Result<()> {
             let storage = shroudb_server_bootstrap::open_storage(&data_dir, key_source.as_ref())
                 .await
                 .context("failed to open storage engine")?;
-            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "courier"));
-            run_server(cfg, store).await
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(
+                storage.clone(),
+                "courier",
+            ));
+            run_server(cfg, store, Some(storage)).await
         }
         "remote" => {
             let uri = cfg
@@ -73,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store).await
+            run_server(cfg, store, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
@@ -82,9 +85,38 @@ async fn main() -> anyhow::Result<()> {
 async fn run_server<S: Store + 'static>(
     cfg: CourierServerConfig,
     store: Arc<S>,
+    storage: Option<Arc<shroudb_storage::StorageEngine>>,
 ) -> anyhow::Result<()> {
+    use shroudb_server_bootstrap::Capability;
+
+    // Resolve [audit] and [policy] capabilities — no silent None.
+    let audit_cfg = cfg.audit.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [audit] config section. Pick one:\n  \
+             [audit] mode = \"remote\" addr = \"chronicle.internal:7300\"\n  \
+             [audit] mode = \"embedded\"\n  \
+             [audit] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let audit_cap = audit_cfg
+        .resolve(storage.clone())
+        .await
+        .context("failed to resolve [audit] capability")?;
+    let policy_cfg = cfg.policy.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [policy] config section. Pick one:\n  \
+             [policy] mode = \"remote\" addr = \"sentry.internal:7100\"\n  \
+             [policy] mode = \"embedded\"\n  \
+             [policy] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let policy_cap = policy_cfg
+        .resolve(storage.clone(), audit_cap.as_ref().cloned())
+        .await
+        .context("failed to resolve [policy] capability")?;
+
     // Cipher decryptor
-    let decryptor: Option<Arc<dyn shroudb_courier_engine::Decryptor>> =
+    let decryptor: Capability<Arc<dyn shroudb_courier_engine::Decryptor>> =
         if let Some(ref cipher_cfg) = cfg.cipher {
             let d = cipher_client::CipherDecryptor::new(
                 &cipher_cfg.addr,
@@ -92,10 +124,16 @@ async fn run_server<S: Store + 'static>(
                 cipher_cfg.auth_token.as_deref(),
             )
             .await?;
-            Some(Arc::new(d))
+            Capability::Enabled(Arc::new(d))
         } else {
-            tracing::warn!("no cipher configuration — recipients will be treated as plaintext");
-            None
+            tracing::warn!(
+                "no [cipher] configuration — recipients will be treated as plaintext; \
+                 decryption slot is explicit DisabledWithJustification so the server \
+                 advertises this posture"
+            );
+            Capability::disabled(
+                "no [cipher] section in courier config — recipients treated as plaintext",
+            )
         };
 
     // Engine
@@ -103,10 +141,15 @@ async fn run_server<S: Store + 'static>(
         "open" => shroudb_courier_engine::PolicyMode::Open,
         _ => shroudb_courier_engine::PolicyMode::Closed,
     };
-    let engine =
-        CourierEngine::new_with_policy_mode(Arc::clone(&store), decryptor, None, None, policy_mode)
-            .await
-            .context("failed to initialize courier engine")?;
+    let engine = CourierEngine::new_with_policy_mode(
+        Arc::clone(&store),
+        decryptor,
+        policy_cap,
+        audit_cap,
+        policy_mode,
+    )
+    .await
+    .context("failed to initialize courier engine")?;
     let engine = Arc::new(engine);
 
     // Register adapters
@@ -201,4 +244,15 @@ async fn run_server<S: Store + 'static>(
     let _ = tcp_handle.await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_debug_asserts() {
+        Cli::command().debug_assert();
+    }
 }
