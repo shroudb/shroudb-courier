@@ -90,11 +90,91 @@ fn default_data_dir() -> String {
     "./courier-data".into()
 }
 
+/// Cipher (recipient-decryption) capability slot.
+///
+/// Two modes:
+/// - `mode = "remote"` (default): point at an external `shroudb-cipher`
+///   server at `addr`. Keyring and optional auth token are used per call.
+/// - `mode = "embedded"`: bundle an in-process `CipherEngine` on the same
+///   `StorageEngine` as Courier's metadata (distinct namespace). Requires
+///   `store.mode = "embedded"`.
+///
+/// Omit `[cipher]` entirely to run Courier without decryption — recipients
+/// are then treated as already-plaintext and the slot is
+/// `DisabledWithJustification` so operators see the posture at startup.
 #[derive(Debug, Deserialize)]
 pub struct CipherConfig {
-    pub addr: String,
+    #[serde(default = "default_cipher_mode")]
+    pub mode: String,
+    #[serde(default = "default_cipher_keyring")]
     pub keyring: String,
+
+    // Remote mode
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default)]
     pub auth_token: Option<String>,
+
+    // Embedded mode
+    #[serde(default = "default_rotation_days")]
+    pub rotation_days: u32,
+    #[serde(default = "default_drain_days")]
+    pub drain_days: u32,
+    #[serde(default = "default_scheduler_interval_secs")]
+    pub scheduler_interval_secs: u64,
+    #[serde(default = "default_cipher_algorithm")]
+    pub algorithm: String,
+}
+
+impl CipherConfig {
+    pub fn is_embedded(&self) -> bool {
+        self.mode == "embedded"
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.mode == "remote"
+    }
+
+    pub fn validate(&self, store_mode: &str) -> anyhow::Result<()> {
+        match self.mode.as_str() {
+            "remote" => {
+                if self.addr.is_none() {
+                    anyhow::bail!("cipher.mode = \"remote\" requires cipher.addr");
+                }
+            }
+            "embedded" => {
+                if store_mode != "embedded" {
+                    anyhow::bail!(
+                        "cipher.mode = \"embedded\" requires store.mode = \"embedded\" \
+                         (embedded Cipher shares the StorageEngine with Courier)"
+                    );
+                }
+            }
+            other => anyhow::bail!(
+                "unknown cipher.mode: {other:?} (expected \"remote\" or \"embedded\")"
+            ),
+        }
+        Ok(())
+    }
+}
+
+fn default_cipher_mode() -> String {
+    "remote".into()
+}
+fn default_cipher_keyring() -> String {
+    "courier-recipients".into()
+}
+fn default_rotation_days() -> u32 {
+    90
+}
+fn default_drain_days() -> u32 {
+    30
+}
+fn default_scheduler_interval_secs() -> u64 {
+    3600
+}
+fn default_cipher_algorithm() -> String {
+    "aes-256-gcm".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +230,51 @@ uri = "shroudb://token@127.0.0.1:6399"
             cfg.store.uri.as_deref(),
             Some("shroudb://token@127.0.0.1:6399")
         );
+    }
+
+    #[test]
+    fn config_parses_cipher_embedded_mode() {
+        let toml = r#"
+[cipher]
+mode = "embedded"
+keyring = "courier-recipients"
+rotation_days = 60
+"#;
+        let cfg: CourierServerConfig = toml::from_str(toml).expect("parse failed");
+        let cipher = cfg.cipher.expect("cipher section present");
+        assert!(cipher.is_embedded());
+        assert_eq!(cipher.rotation_days, 60);
+        cipher.validate("embedded").expect("embedded valid");
+        assert!(
+            cipher.validate("remote").is_err(),
+            "embedded cipher requires embedded store"
+        );
+    }
+
+    #[test]
+    fn config_parses_cipher_remote_requires_addr() {
+        let toml = r#"
+[cipher]
+mode = "remote"
+keyring = "courier-recipients"
+"#;
+        let cfg: CourierServerConfig = toml::from_str(toml).unwrap();
+        let cipher = cfg.cipher.unwrap();
+        assert!(cipher.is_remote());
+        assert!(
+            cipher.validate("embedded").is_err(),
+            "remote without addr fails"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_cipher_mode() {
+        let toml = r#"
+[cipher]
+mode = "bogus"
+"#;
+        let cfg: CourierServerConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.cipher.unwrap().validate("embedded").is_err());
     }
 
     #[test]

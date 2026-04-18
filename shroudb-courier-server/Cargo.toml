@@ -23,6 +23,8 @@ shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }
 tokio-rustls = { workspace = true }
 shroudb-cipher-client = { workspace = true }
+shroudb-cipher-engine = { workspace = true }
+shroudb-cipher-core = { workspace = true }
 shroudb-crypto = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
 shroudb-engine-bootstrap = { workspace = true }
@@ -42,5 +44,6 @@ reqwest = { workspace = true }
 
 [dev-dependencies]
 shroudb-courier-client = { workspace = true }
+shroudb-storage = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["full", "test-util"] }
 tempfile = "3"

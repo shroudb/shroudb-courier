@@ -1,5 +1,6 @@
 mod adapters;
 mod cipher_client;
+mod cipher_embedded;
 mod config;
 mod tcp;
 
@@ -7,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+use shroudb_cipher_engine::engine::{CipherConfig as CipherEngineConfig, CipherEngine};
 use shroudb_courier_core::{Channel, ChannelType};
 use shroudb_courier_engine::CourierEngine;
 use shroudb_store::Store;
@@ -62,7 +64,8 @@ async fn main() -> anyhow::Result<()> {
                 storage.clone(),
                 "courier",
             ));
-            run_server(cfg, store, Some(storage)).await
+            let cipher_embedded = build_cipher_embedded(&cfg, storage.clone()).await?;
+            run_server(cfg, store, Some(storage), cipher_embedded).await
         }
         "remote" => {
             let uri = cfg
@@ -76,16 +79,108 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store, None).await
+            if let Some(ref cipher_cfg) = cfg.cipher
+                && cipher_cfg.is_embedded()
+            {
+                anyhow::bail!(
+                    "cipher.mode = \"embedded\" requires store.mode = \"embedded\" \
+                     (embedded Cipher needs a co-located StorageEngine)"
+                );
+            }
+            run_server(cfg, store, None, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
+}
+
+/// Build an in-process `CipherEngine` on a dedicated namespace of the same
+/// storage engine Courier uses. Returns `None` when `[cipher]` is absent or
+/// not in embedded mode.
+async fn build_cipher_embedded(
+    cfg: &CourierServerConfig,
+    storage: Arc<shroudb_storage::StorageEngine>,
+) -> anyhow::Result<Option<CipherEmbeddedHandle>> {
+    use shroudb_cipher_core::keyring::KeyringAlgorithm;
+    use shroudb_cipher_engine::keyring_manager::KeyringCreateOpts;
+
+    let cipher_cfg = match cfg.cipher.as_ref() {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    cipher_cfg
+        .validate(&cfg.store.mode)
+        .context("invalid [cipher] config")?;
+    if !cipher_cfg.is_embedded() {
+        return Ok(None);
+    }
+
+    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "cipher"));
+    let engine_cfg = CipherEngineConfig {
+        default_rotation_days: cipher_cfg.rotation_days,
+        default_drain_days: cipher_cfg.drain_days,
+        scheduler_interval_secs: cipher_cfg.scheduler_interval_secs,
+    };
+    let engine = CipherEngine::new(
+        store,
+        engine_cfg,
+        shroudb_server_bootstrap::Capability::disabled(
+            "courier-server embedded Cipher: policy evaluation flows through Courier's own sentry slot",
+        ),
+        shroudb_server_bootstrap::Capability::disabled(
+            "courier-server embedded Cipher: audit events flow through Courier's own chronicle slot",
+        ),
+    )
+    .await
+    .context("failed to initialize embedded Cipher engine")?;
+
+    let algorithm: KeyringAlgorithm = cipher_cfg
+        .algorithm
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!("invalid cipher.algorithm: {e}"))?;
+    // Idempotent seed — creation races against ExistsError are the only
+    // expected failure, and the keyring is then already usable.
+    match engine
+        .keyring_manager()
+        .create(
+            &cipher_cfg.keyring,
+            algorithm,
+            KeyringCreateOpts {
+                rotation_days: cipher_cfg.rotation_days,
+                drain_days: cipher_cfg.drain_days,
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        Ok(_) | Err(shroudb_cipher_core::error::CipherError::KeyringExists(_)) => {}
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "failed to seed embedded cipher keyring '{}': {e}",
+                cipher_cfg.keyring
+            ));
+        }
+    }
+
+    tracing::info!(
+        keyring = %cipher_cfg.keyring,
+        "embedded Cipher engine initialized on 'cipher' namespace"
+    );
+    Ok(Some(CipherEmbeddedHandle {
+        engine: Arc::new(engine),
+        keyring: cipher_cfg.keyring.clone(),
+    }))
+}
+
+struct CipherEmbeddedHandle {
+    engine: Arc<CipherEngine<shroudb_storage::EmbeddedStore>>,
+    keyring: String,
 }
 
 async fn run_server<S: Store + 'static>(
     cfg: CourierServerConfig,
     store: Arc<S>,
     storage: Option<Arc<shroudb_storage::StorageEngine>>,
+    cipher_embedded: Option<CipherEmbeddedHandle>,
 ) -> anyhow::Result<()> {
     use shroudb_server_bootstrap::Capability;
 
@@ -115,25 +210,42 @@ async fn run_server<S: Store + 'static>(
         .await
         .context("failed to resolve [policy] capability")?;
 
-    // Cipher decryptor
+    // Cipher decryptor: embedded (co-located), remote (external Cipher),
+    // or explicit DisabledWithJustification when [cipher] is absent.
     let decryptor: Capability<Arc<dyn shroudb_courier_engine::Decryptor>> =
-        if let Some(ref cipher_cfg) = cfg.cipher {
-            let d = cipher_client::CipherDecryptor::new(
-                &cipher_cfg.addr,
-                &cipher_cfg.keyring,
-                cipher_cfg.auth_token.as_deref(),
-            )
-            .await?;
-            Capability::Enabled(Arc::new(d))
-        } else {
-            tracing::warn!(
-                "no [cipher] configuration — recipients will be treated as plaintext; \
-                 decryption slot is explicit DisabledWithJustification so the server \
-                 advertises this posture"
-            );
-            Capability::disabled(
-                "no [cipher] section in courier config — recipients treated as plaintext",
-            )
+        match (cfg.cipher.as_ref(), cipher_embedded) {
+            (Some(_), Some(handle)) => {
+                tracing::info!(
+                    keyring = %handle.keyring,
+                    "courier: using embedded Cipher for recipient decryption"
+                );
+                Capability::Enabled(Arc::new(cipher_embedded::EmbeddedDecryptor::new(
+                    handle.engine,
+                    handle.keyring,
+                )))
+            }
+            (Some(cipher_cfg), None) if cipher_cfg.is_remote() => {
+                let addr = cipher_cfg.addr.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("cipher.mode = \"remote\" requires cipher.addr")
+                })?;
+                let d = cipher_client::CipherDecryptor::new(
+                    addr,
+                    &cipher_cfg.keyring,
+                    cipher_cfg.auth_token.as_deref(),
+                )
+                .await?;
+                Capability::Enabled(Arc::new(d))
+            }
+            _ => {
+                tracing::warn!(
+                    "no [cipher] configuration — recipients will be treated as plaintext; \
+                     decryption slot is explicit DisabledWithJustification so the server \
+                     advertises this posture"
+                );
+                Capability::disabled(
+                    "no [cipher] section in courier config — recipients treated as plaintext",
+                )
+            }
         };
 
     // Engine
@@ -230,10 +342,11 @@ async fn run_server<S: Store + 'static>(
     eprintln!("├─ data:    {}", cfg.store.data_dir);
     eprintln!(
         "├─ cipher:  {}",
-        cfg.cipher
-            .as_ref()
-            .map(|c| c.addr.as_str())
-            .unwrap_or("disabled")
+        match cfg.cipher.as_ref() {
+            Some(c) if c.is_embedded() => "embedded",
+            Some(c) => c.addr.as_deref().unwrap_or("remote (addr missing)"),
+            None => "disabled",
+        }
     );
     eprintln!("└─ key:     {key_mode}");
     eprintln!();
