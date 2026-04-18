@@ -103,7 +103,7 @@ Courier itself implements **no cryptographic primitives**. All cryptography is d
 
 **Two-layer authorization:**
 
-1. **Protocol layer** (dispatch.rs): `shroudb_acl::check_dispatch_acl(auth_context, &cmd.acl_requirement())` — validates `AuthContext` against per-command ACL requirements. Public commands (HEALTH, PING, AUTH, COMMAND LIST, CHANNEL LIST) require no auth. Admin commands (CHANNEL CREATE/DELETE) require admin. Namespace-scoped commands (CHANNEL GET, DELIVER, NOTIFY_EVENT) require read/write on `courier.{channel}.*`.
+1. **Protocol layer** (dispatch.rs): `shroudb_acl::check_dispatch_acl(auth_context, &cmd.acl_requirement())` — validates `AuthContext` against per-command ACL requirements. Public commands (HEALTH, PING, AUTH, COMMAND LIST, HELLO) require no auth. Admin commands (CHANNEL CREATE/DELETE/LIST, DELIVERY GET/LIST, METRICS) require admin. Namespace-scoped commands (CHANNEL GET, DELIVER, NOTIFY_EVENT) require read/write on `courier.{channel}.*`.
 
 2. **Engine layer** (engine.rs): Optional `PolicyEvaluator` (ABAC) for channel_create, channel_delete, deliver. If no evaluator configured, all policies pass — this is the **allow-when-absent** pattern, not the Sentry fallback pattern. The Sentry fallback pattern (deny when Sentry unavailable) is **not implemented** here.
 

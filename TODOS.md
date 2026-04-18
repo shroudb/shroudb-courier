@@ -23,4 +23,4 @@ Rules:
 - [x] **DEBT-4** — `notify_event` must check a distinct policy action, not piggyback on `deliver`. Test: `debt_4_notify_event_must_check_distinct_policy_action` @ same file.
 - [x] **DEBT-5** — `seed_channel` must emit a Chronicle event (currently bypasses both policy + audit). Test: `debt_5_seed_channel_must_emit_chronicle_event` @ same file.
 - [x] **F-courier-6 (M)** — `channel_manager.rs:71,97,101` cache/store ordering is inconsistent; partial failure leaves cache/store divergent. Test: `debt_6_channel_mutation_must_persist_to_store_before_touching_cache` @ `shroudb-courier-engine/src/engine.rs`.
-- [ ] **F-courier-7 (L)** — `commands.rs:55` `ChannelList` and `Metrics` are `AclRequirement::None`; unauthenticated enumeration. *No debt test yet; add one before fixing.*
+- [x] **F-courier-7 (L)** — `commands.rs:55` `ChannelList` and `Metrics` are `AclRequirement::None`; unauthenticated enumeration. Test: `debt_7_channel_list_and_metrics_must_not_be_public` @ `shroudb-courier-protocol/src/commands.rs`.

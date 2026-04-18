@@ -80,7 +80,7 @@ response = { name = "string", channel_type = "string", enabled = "boolean", crea
 [commands.CHANNEL_LIST]
 syntax = "CHANNEL LIST"
 description = "List all channels"
-acl = "none"
+acl = "admin"
 response = { status = "string", count = "integer", channels = "array" }
 
 [commands.CHANNEL_DELETE]
@@ -135,7 +135,7 @@ response = { status = "string", count = "integer", receipts = "array" }
 [commands.METRICS]
 syntax = "METRICS"
 description = "Get delivery metrics (total, success, failure counts, per-channel breakdown)"
-acl = "none"
+acl = "admin"
 response = { total_deliveries = "integer", delivered = "integer", failed = "integer", per_channel = "object" }
 
 [commands.HEALTH]

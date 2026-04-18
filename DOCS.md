@@ -200,10 +200,9 @@ Standard operational commands following the ShrouDB engine pattern.
 
 | Command | Requirement |
 |---------|-------------|
-| AUTH, HEALTH, PING, COMMAND LIST | None |
-| CHANNEL LIST, METRICS | None |
-| CHANNEL CREATE/DELETE | Admin |
-| DELIVERY GET/LIST | Admin |
+| AUTH, HEALTH, PING, COMMAND LIST, HELLO | None |
+| CHANNEL CREATE/DELETE/LIST | Admin |
+| DELIVERY GET/LIST, METRICS | Admin |
 | CHANNEL GET | Namespace Read (`courier.{name}.*`) |
 | DELIVER, NOTIFY_EVENT | Namespace Write (`courier.{channel}.*`) |
 

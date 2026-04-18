@@ -50,9 +50,14 @@ impl CourierCommand {
             | CourierCommand::Health
             | CourierCommand::Ping
             | CourierCommand::CommandList
-            | CourierCommand::Hello
-            | CourierCommand::Metrics
-            | CourierCommand::ChannelList => AclRequirement::None,
+            | CourierCommand::Hello => AclRequirement::None,
+
+            // Channel enumeration and delivery metrics are NOT public: channel
+            // names leak delivery intent (e.g. `finance-alerts`,
+            // `customer-pii-webhook`) and per-channel counters leak activity
+            // patterns. Keep them on the same admin tier as the rest of the
+            // management surface.
+            CourierCommand::ChannelList | CourierCommand::Metrics => AclRequirement::Admin,
 
             CourierCommand::DeliveryGet { .. } | CourierCommand::DeliveryList { .. } => {
                 AclRequirement::Admin
@@ -426,12 +431,33 @@ mod tests {
             CourierCommand::Health,
             CourierCommand::Ping,
             CourierCommand::CommandList,
-            CourierCommand::Metrics,
-            CourierCommand::ChannelList,
         ];
         for cmd in &cmds {
             assert_eq!(cmd.acl_requirement(), AclRequirement::None);
         }
+    }
+
+    /// F-courier-7 (LOW): `CHANNEL LIST` and `METRICS` were declared as
+    /// `AclRequirement::None`, which means an unauthenticated caller
+    /// could enumerate every channel on the server and read per-channel
+    /// delivery counts. Channel names leak intent (`finance-alerts`,
+    /// `customer-pii-webhook`, …) and metrics leak activity patterns;
+    /// neither is appropriate for the public tier. Bring them under the
+    /// same `Admin` gate the rest of the management surface uses.
+    #[test]
+    fn debt_7_channel_list_and_metrics_must_not_be_public() {
+        assert_eq!(
+            CourierCommand::ChannelList.acl_requirement(),
+            AclRequirement::Admin,
+            "CHANNEL LIST must require admin — unauthenticated channel \
+             enumeration leaks delivery intent"
+        );
+        assert_eq!(
+            CourierCommand::Metrics.acl_requirement(),
+            AclRequirement::Admin,
+            "METRICS must require admin — unauthenticated per-channel \
+             counters leak activity patterns"
+        );
     }
 
     #[test]

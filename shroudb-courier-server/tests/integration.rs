@@ -172,11 +172,10 @@ async fn test_acl_unauthenticated_public() {
     let server = TestServer::start_with_config(acl_config()).await;
     let mut client = CourierClient::connect(&server.tcp_addr).await.unwrap();
 
+    // HEALTH stays public — operators need it for liveness probes before
+    // they have a token. Nothing else on the management surface does.
     let resp = client.health().await.unwrap();
     assert_eq!(resp["status"], "ok");
-
-    let resp = client.channel_list().await.unwrap();
-    assert!(resp["count"].is_number());
 }
 
 #[tokio::test]
@@ -189,6 +188,14 @@ async fn test_acl_unauthenticated_rejected() {
 
     let result = client.channel_get("test-hook").await;
     assert!(result.is_err());
+
+    // CHANNEL LIST leaks delivery intent (channel names hint at who is
+    // being paged) — it must require admin, not be open to the network.
+    let result = client.channel_list().await;
+    assert!(
+        result.is_err(),
+        "unauthenticated CHANNEL LIST must be rejected"
+    );
 }
 
 #[tokio::test]
