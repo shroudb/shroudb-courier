@@ -365,6 +365,14 @@ impl<S: Store> CourierEngine<S> {
         body: &str,
         actor: Option<&str>,
     ) -> Result<DeliveryReceipt, CourierError> {
+        // Event notifications are a distinct authorisation surface from
+        // direct delivery: a scheduler (e.g. Cipher key-rotation) needs
+        // `notify_event` on the alert channel, not `deliver`. Check this
+        // FIRST so an actor with delivery rights alone cannot fan out
+        // schedule-driven notifications through the convenience path.
+        self.check_policy(channel_name, "notify_event", actor)
+            .await?;
+
         let channel = self.channel_manager.get(channel_name)?;
         let recipient = channel.default_recipient.as_deref().ok_or_else(|| {
             CourierError::InvalidArgument(format!(
