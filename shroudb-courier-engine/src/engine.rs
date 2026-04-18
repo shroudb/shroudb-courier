@@ -163,6 +163,30 @@ impl<S: Store> CourierEngine<S> {
         actor: Option<&str>,
         start: Instant,
     ) -> Result<(), CourierError> {
+        self.emit_audit_event_with_metadata(
+            operation,
+            resource,
+            result,
+            actor,
+            start,
+            std::collections::HashMap::new(),
+        )
+        .await
+    }
+
+    /// Like [`emit_audit_event`], but attaches arbitrary key/value pairs
+    /// onto the Chronicle event's `metadata` map. Used for failure paths
+    /// that must record the error reason so operators can triage from the
+    /// audit trail alone.
+    async fn emit_audit_event_with_metadata(
+        &self,
+        operation: &str,
+        resource: &str,
+        result: EventResult,
+        actor: Option<&str>,
+        start: Instant,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<(), CourierError> {
         let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
         };
@@ -175,6 +199,7 @@ impl<S: Store> CourierEngine<S> {
             actor.unwrap_or("anonymous").to_string(),
         );
         event.duration_ms = start.elapsed().as_millis() as u64;
+        event.metadata = metadata;
         chronicle
             .record(event)
             .await
@@ -292,8 +317,27 @@ impl<S: Store> CourierEngine<S> {
             DeliveryStatus::Delivered => EventResult::Ok,
             DeliveryStatus::Failed => EventResult::Error,
         };
-        self.emit_audit_event("DELIVER", &request.channel, audit_result, actor, start)
-            .await?;
+        let mut audit_metadata = std::collections::HashMap::new();
+        audit_metadata.insert("delivery_id".to_string(), receipt.delivery_id.clone());
+        if receipt.status == DeliveryStatus::Failed {
+            // Surface the failure reason so operators can triage from the
+            // audit trail alone. Without this, Chronicle entries for failed
+            // deliveries are indistinguishable from successful ones.
+            let reason = receipt
+                .error
+                .clone()
+                .unwrap_or_else(|| "delivery failed without a reported error".to_string());
+            audit_metadata.insert("error".to_string(), reason);
+        }
+        self.emit_audit_event_with_metadata(
+            "DELIVER",
+            &request.channel,
+            audit_result,
+            actor,
+            start,
+            audit_metadata,
+        )
+        .await?;
         Ok(receipt)
     }
 
