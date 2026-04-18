@@ -189,8 +189,20 @@ impl<S: Store> CourierEngine<S> {
     // --- Channel operations ---
 
     pub async fn channel_create(&self, channel: Channel) -> Result<(), CourierError> {
+        self.channel_create_as(channel, None).await
+    }
+
+    /// Same as [`channel_create`] but records the calling `actor` on the
+    /// Chronicle audit event. Callers that have an authenticated identity
+    /// (e.g. the protocol dispatch layer resolving from `AuthContext`) MUST
+    /// use this path so the audit trail attributes the change correctly.
+    pub async fn channel_create_as(
+        &self,
+        channel: Channel,
+        actor: Option<&str>,
+    ) -> Result<(), CourierError> {
         let start = Instant::now();
-        self.check_policy(&channel.name, "channel_create", None)
+        self.check_policy(&channel.name, "channel_create", actor)
             .await?;
         self.channel_manager.create(channel.clone())?;
         self.channel_manager.save(&channel).await?;
@@ -198,7 +210,7 @@ impl<S: Store> CourierEngine<S> {
             "CHANNEL_CREATE",
             &channel.name,
             EventResult::Ok,
-            None,
+            actor,
             start,
         )
         .await?;
@@ -215,10 +227,20 @@ impl<S: Store> CourierEngine<S> {
     }
 
     pub async fn channel_delete(&self, name: &str) -> Result<(), CourierError> {
+        self.channel_delete_as(name, None).await
+    }
+
+    /// Same as [`channel_delete`] but records the calling `actor` on the
+    /// Chronicle audit event.
+    pub async fn channel_delete_as(
+        &self,
+        name: &str,
+        actor: Option<&str>,
+    ) -> Result<(), CourierError> {
         let start = Instant::now();
-        self.check_policy(name, "channel_delete", None).await?;
+        self.check_policy(name, "channel_delete", actor).await?;
         self.channel_manager.delete(name).await?;
-        self.emit_audit_event("CHANNEL_DELETE", name, EventResult::Ok, None, start)
+        self.emit_audit_event("CHANNEL_DELETE", name, EventResult::Ok, actor, start)
             .await?;
         tracing::info!(name = %name, "channel deleted");
         Ok(())
@@ -227,8 +249,19 @@ impl<S: Store> CourierEngine<S> {
     // --- Delivery ---
 
     pub async fn deliver(&self, request: DeliveryRequest) -> Result<DeliveryReceipt, CourierError> {
+        self.deliver_as(request, None).await
+    }
+
+    /// Same as [`deliver`] but records the calling `actor` on the Chronicle
+    /// audit event.
+    pub async fn deliver_as(
+        &self,
+        request: DeliveryRequest,
+        actor: Option<&str>,
+    ) -> Result<DeliveryReceipt, CourierError> {
         let start = Instant::now();
-        self.check_policy(&request.channel, "deliver", None).await?;
+        self.check_policy(&request.channel, "deliver", actor)
+            .await?;
         let channel = self.channel_manager.get(&request.channel)?;
         if !channel.enabled {
             return Err(CourierError::InvalidArgument(format!(
@@ -259,7 +292,7 @@ impl<S: Store> CourierEngine<S> {
             DeliveryStatus::Delivered => EventResult::Ok,
             DeliveryStatus::Failed => EventResult::Error,
         };
-        self.emit_audit_event("DELIVER", &request.channel, audit_result, None, start)
+        self.emit_audit_event("DELIVER", &request.channel, audit_result, actor, start)
             .await?;
         Ok(receipt)
     }
@@ -274,6 +307,19 @@ impl<S: Store> CourierEngine<S> {
         channel_name: &str,
         subject: &str,
         body: &str,
+    ) -> Result<DeliveryReceipt, CourierError> {
+        self.notify_event_as(channel_name, subject, body, None)
+            .await
+    }
+
+    /// Same as [`notify_event`] but records the calling `actor` on the
+    /// Chronicle audit event.
+    pub async fn notify_event_as(
+        &self,
+        channel_name: &str,
+        subject: &str,
+        body: &str,
+        actor: Option<&str>,
     ) -> Result<DeliveryReceipt, CourierError> {
         let channel = self.channel_manager.get(channel_name)?;
         let recipient = channel.default_recipient.as_deref().ok_or_else(|| {
@@ -292,7 +338,7 @@ impl<S: Store> CourierEngine<S> {
             content_type: None,
         };
 
-        self.deliver(request).await
+        self.deliver_as(request, actor).await
     }
 
     // --- Receipt persistence ---
@@ -1135,16 +1181,10 @@ mod tests {
             created_at: 1000,
             default_recipient: None,
         };
-        engine.channel_create(ch).await.unwrap();
+        // The engine must accept a caller actor and thread it into the audit
+        // trail — it MUST NOT drop the identity on the floor.
+        engine.channel_create_as(ch, Some("alice")).await.unwrap();
 
-        // Today there is no deliver_as(actor, ...) / no actor parameter on
-        // `deliver()` — the engine drops the caller identity on the floor.
-        // This test asserts the behaviour we want: if you invoke deliver
-        // you MUST be able to pass an actor and it MUST land in the audit
-        // event. Since today the parameter does not exist we drive the
-        // existing API and assert the CHANNEL_CREATE event carried an
-        // actor — that already fails the ratchet because `channel_create`
-        // also hardcodes `None`.
         let events = chronicle.events();
         let create_event = events
             .iter()
@@ -1154,6 +1194,10 @@ mod tests {
             create_event.actor, "anonymous",
             "CHANNEL_CREATE must carry the caller's actor; engine currently drops actor on the floor \
              (same shape as the Sigil audit-actor bug)"
+        );
+        assert_eq!(
+            create_event.actor, "alice",
+            "CHANNEL_CREATE must record the exact caller identity supplied by the protocol layer"
         );
     }
 

@@ -32,6 +32,8 @@ pub async fn dispatch<S: Store>(
         return CourierResponse::error(e);
     }
 
+    let actor = auth_context.map(|c| c.actor.as_str());
+
     match cmd {
         CourierCommand::Auth { .. } => {
             CourierResponse::error("AUTH is handled at the connection layer")
@@ -41,21 +43,23 @@ pub async fn dispatch<S: Store>(
             name,
             channel_type,
             config_json,
-        } => handle_channel_create(engine, &name, &channel_type, &config_json).await,
+        } => handle_channel_create(engine, &name, &channel_type, &config_json, actor).await,
 
         CourierCommand::ChannelGet { name } => handle_channel_get(engine, &name),
 
         CourierCommand::ChannelList => handle_channel_list(engine),
 
-        CourierCommand::ChannelDelete { name } => handle_channel_delete(engine, &name).await,
+        CourierCommand::ChannelDelete { name } => handle_channel_delete(engine, &name, actor).await,
 
         CourierCommand::NotifyEvent {
             channel,
             subject,
             body,
-        } => handle_notify_event(engine, &channel, &subject, &body).await,
+        } => handle_notify_event(engine, &channel, &subject, &body, actor).await,
 
-        CourierCommand::Deliver { request_json } => handle_deliver(engine, &request_json).await,
+        CourierCommand::Deliver { request_json } => {
+            handle_deliver(engine, &request_json, actor).await
+        }
 
         CourierCommand::DeliveryGet { id } => handle_delivery_get(engine, &id).await,
 
@@ -95,6 +99,7 @@ async fn handle_channel_create<S: Store>(
     name: &str,
     channel_type: &str,
     config_json: &str,
+    actor: Option<&str>,
 ) -> CourierResponse {
     let ct: shroudb_courier_core::ChannelType = match channel_type.parse() {
         Ok(ct) => ct,
@@ -142,7 +147,7 @@ async fn handle_channel_create<S: Store>(
         default_recipient: None,
     };
 
-    match engine.channel_create(channel).await {
+    match engine.channel_create_as(channel, actor).await {
         Ok(()) => CourierResponse::ok(serde_json::json!({
             "status": "ok",
             "name": name,
@@ -171,8 +176,12 @@ fn handle_channel_list<S: Store>(engine: &CourierEngine<S>) -> CourierResponse {
     }))
 }
 
-async fn handle_channel_delete<S: Store>(engine: &CourierEngine<S>, name: &str) -> CourierResponse {
-    match engine.channel_delete(name).await {
+async fn handle_channel_delete<S: Store>(
+    engine: &CourierEngine<S>,
+    name: &str,
+    actor: Option<&str>,
+) -> CourierResponse {
+    match engine.channel_delete_as(name, actor).await {
         Ok(()) => CourierResponse::ok(serde_json::json!({
             "status": "ok",
             "name": name,
@@ -186,8 +195,9 @@ async fn handle_notify_event<S: Store>(
     channel: &str,
     subject: &str,
     body: &str,
+    actor: Option<&str>,
 ) -> CourierResponse {
-    match engine.notify_event(channel, subject, body).await {
+    match engine.notify_event_as(channel, subject, body, actor).await {
         Ok(receipt) => match serde_json::to_value(&receipt) {
             Ok(v) => CourierResponse::ok(v),
             Err(e) => CourierResponse::error(format!("serialization error: {e}")),
@@ -199,13 +209,14 @@ async fn handle_notify_event<S: Store>(
 async fn handle_deliver<S: Store>(
     engine: &CourierEngine<S>,
     request_json: &str,
+    actor: Option<&str>,
 ) -> CourierResponse {
     let request: shroudb_courier_core::DeliveryRequest = match serde_json::from_str(request_json) {
         Ok(r) => r,
         Err(e) => return CourierResponse::error(format!("invalid delivery request JSON: {e}")),
     };
 
-    match engine.deliver(request).await {
+    match engine.deliver_as(request, actor).await {
         Ok(receipt) => match serde_json::to_value(&receipt) {
             Ok(v) => CourierResponse::ok(v),
             Err(e) => CourierResponse::error(format!("serialization error: {e}")),
