@@ -229,17 +229,12 @@ impl<S: Store> CourierEngine<S> {
         let start = Instant::now();
         self.check_policy(&channel.name, "channel_create", actor)
             .await?;
-        self.channel_manager.create(channel.clone())?;
-        self.channel_manager.save(&channel).await?;
-        self.emit_audit_event(
-            "CHANNEL_CREATE",
-            &channel.name,
-            EventResult::Ok,
-            actor,
-            start,
-        )
-        .await?;
-        tracing::info!(name = %channel.name, channel_type = %channel.channel_type, "channel created");
+        let name = channel.name.clone();
+        let channel_type = channel.channel_type;
+        self.channel_manager.create_and_save(channel).await?;
+        self.emit_audit_event("CHANNEL_CREATE", &name, EventResult::Ok, actor, start)
+            .await?;
+        tracing::info!(name = %name, channel_type = %channel_type, "channel created");
         Ok(())
     }
 
@@ -1482,6 +1477,107 @@ mod tests {
         assert!(
             !seed_events.is_empty(),
             "seed_channel must emit a Chronicle event (today it silently bypasses audit)"
+        );
+    }
+
+    /// F-courier-6 (MED): `ChannelManager` mutates its in-memory cache
+    /// BEFORE persisting to the store. On create: `create()` inserts into
+    /// `cache` and `save()` later writes to the store — if the store write
+    /// fails, the cache already advertises the channel and subsequent
+    /// `channel_get()` / `deliver()` calls will hit it. On delete: the
+    /// cache entry is removed first, then the store is tombstoned — if
+    /// the store tombstone fails, the channel still exists on disk and
+    /// will reappear on the next `init()`. Both orderings leave cache and
+    /// store divergent under partial failure. The correct order is
+    /// store-first so the cache never holds a state the store doesn't.
+    #[tokio::test]
+    async fn debt_6_channel_mutation_must_persist_to_store_before_touching_cache() {
+        let store = shroudb_storage::test_util::create_test_store("courier-debt-6-ordering").await;
+        let engine = CourierEngine::new_with_policy_mode(
+            store.clone(),
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+
+        // ── create path ─────────────────────────────────────────────
+        // Break the channel namespace so the store write will fail. The
+        // engine's `channel_create` MUST NOT leave the cache advertising
+        // a channel that was never persisted.
+        store
+            .namespace_drop("courier.channels", true)
+            .await
+            .unwrap();
+
+        let ch = Channel {
+            name: "ghost".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        let err = engine.channel_create(ch).await;
+        assert!(err.is_err(), "store write must fail after namespace drop");
+        assert!(
+            engine.channel_get("ghost").is_err(),
+            "failed channel_create must NOT leave the channel visible in cache \
+             (cache and store have diverged — restart would lose the channel)"
+        );
+        assert!(
+            !engine.channel_list().contains(&"ghost".to_string()),
+            "failed channel_create must NOT advertise the channel in the list view"
+        );
+
+        // ── delete path ─────────────────────────────────────────────
+        // Start fresh: create a persisted channel, then break the
+        // namespace so the store delete will fail, then ensure the cache
+        // still reflects the real durable state.
+        let store = shroudb_storage::test_util::create_test_store("courier-debt-6-delete").await;
+        let engine = CourierEngine::new_with_policy_mode(
+            store.clone(),
+            Capability::Enabled(Arc::new(MockDecryptor)),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            PolicyMode::Open,
+        )
+        .await
+        .unwrap();
+
+        let ch = Channel {
+            name: "keeper".into(),
+            channel_type: ChannelType::Webhook,
+            smtp: None,
+            webhook: Some(WebhookConfig {
+                default_method: None,
+                default_headers: None,
+                timeout_secs: None,
+            }),
+            enabled: true,
+            created_at: 1000,
+            default_recipient: None,
+        };
+        engine.channel_create(ch).await.unwrap();
+        assert!(engine.channel_get("keeper").is_ok());
+
+        store
+            .namespace_drop("courier.channels", true)
+            .await
+            .unwrap();
+        let err = engine.channel_delete("keeper").await;
+        assert!(err.is_err(), "store delete must fail after namespace drop");
+        assert!(
+            engine.channel_get("keeper").is_ok(),
+            "failed channel_delete must NOT evict from cache when the store \
+             delete did not succeed (cache lies about durable state)"
         );
     }
 

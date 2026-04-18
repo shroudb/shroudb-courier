@@ -60,7 +60,14 @@ impl<S: Store> ChannelManager<S> {
         Ok(())
     }
 
-    pub fn create(&self, channel: Channel) -> Result<(), CourierError> {
+    /// Persist `channel` to the store and, on success, publish it in the
+    /// in-memory cache. This is the single atomic step callers should use
+    /// to introduce a new channel — a failed store write leaves the cache
+    /// untouched so restart state stays consistent.
+    ///
+    /// Rejects duplicates (same name already present in cache) without
+    /// touching the store.
+    pub async fn create_and_save(&self, channel: Channel) -> Result<(), CourierError> {
         shroudb_courier_core::channel::validate_name(&channel.name)
             .map_err(CourierError::InvalidName)?;
 
@@ -68,17 +75,16 @@ impl<S: Store> ChannelManager<S> {
             return Err(CourierError::ChannelExists(channel.name.clone()));
         }
 
-        self.cache.insert(channel.name.clone(), Arc::new(channel));
-        Ok(())
-    }
-
-    pub async fn save(&self, channel: &Channel) -> Result<(), CourierError> {
+        // Store-first: if the put fails the cache stays clean, preserving
+        // the invariant that every cache entry has a durable counterpart.
         let value =
-            serde_json::to_vec(channel).map_err(|e| CourierError::Internal(e.to_string()))?;
+            serde_json::to_vec(&channel).map_err(|e| CourierError::Internal(e.to_string()))?;
         self.store
             .put(CHANNELS_NAMESPACE, channel.name.as_bytes(), &value, None)
             .await
             .map_err(store_err)?;
+
+        self.cache.insert(channel.name.clone(), Arc::new(channel));
         Ok(())
     }
 
@@ -94,13 +100,17 @@ impl<S: Store> ChannelManager<S> {
     }
 
     pub async fn delete(&self, name: &str) -> Result<(), CourierError> {
-        if self.cache.remove(name).is_none() {
+        if !self.cache.contains_key(name) {
             return Err(CourierError::ChannelNotFound(name.to_string()));
         }
+        // Store-first: if the tombstone write fails, the cache keeps
+        // advertising the channel — consistent with what the next
+        // `init()` would load.
         self.store
             .delete(CHANNELS_NAMESPACE, name.as_bytes())
             .await
             .map_err(store_err)?;
+        self.cache.remove(name);
         Ok(())
     }
 
@@ -113,9 +123,9 @@ impl<S: Store> ChannelManager<S> {
             tracing::debug!(name = %channel.name, "channel already exists, skipping seed");
             return Ok(false);
         }
-        self.create(channel.clone())?;
-        self.save(&channel).await?;
-        tracing::info!(name = %channel.name, "seeded channel from config");
+        let name = channel.name.clone();
+        self.create_and_save(channel).await?;
+        tracing::info!(name = %name, "seeded channel from config");
         Ok(true)
     }
 }
@@ -172,8 +182,7 @@ mod tests {
         mgr.init().await.unwrap();
 
         let ch = test_channel("email-prod");
-        mgr.create(ch.clone()).unwrap();
-        mgr.save(&ch).await.unwrap();
+        mgr.create_and_save(ch).await.unwrap();
 
         let got = mgr.get("email-prod").unwrap();
         assert_eq!(got.name, "email-prod");
@@ -193,8 +202,8 @@ mod tests {
         mgr.init().await.unwrap();
 
         let ch = test_channel("dup");
-        mgr.create(ch.clone()).unwrap();
-        assert!(mgr.create(ch).is_err());
+        mgr.create_and_save(ch.clone()).await.unwrap();
+        assert!(mgr.create_and_save(ch).await.is_err());
     }
 
     #[tokio::test]
@@ -205,7 +214,7 @@ mod tests {
 
         let mut ch = test_channel("valid");
         ch.name = "has spaces".into();
-        assert!(mgr.create(ch).is_err());
+        assert!(mgr.create_and_save(ch).await.is_err());
     }
 
     #[tokio::test]
@@ -221,8 +230,7 @@ mod tests {
         let mgr = ChannelManager::new(store);
         mgr.init().await.unwrap();
         let ch = test_channel("persist-me");
-        mgr.create(ch.clone()).unwrap();
-        mgr.save(&ch).await.unwrap();
+        mgr.create_and_save(ch).await.unwrap();
         drop(mgr);
 
         let config2 = StorageEngineConfig {
