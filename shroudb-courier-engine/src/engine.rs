@@ -255,7 +255,11 @@ impl<S: Store> CourierEngine<S> {
         self.record_metrics(&receipt);
         self.persist_receipt(&receipt).await?;
 
-        self.emit_audit_event("DELIVER", &request.channel, EventResult::Ok, None, start)
+        let audit_result = match receipt.status {
+            DeliveryStatus::Delivered => EventResult::Ok,
+            DeliveryStatus::Failed => EventResult::Error,
+        };
+        self.emit_audit_event("DELIVER", &request.channel, audit_result, None, start)
             .await?;
         Ok(receipt)
     }
