@@ -78,9 +78,3 @@ shroudb-cipher-client = { version = "1.6.0", registry = "shroudb" }
 
 # Testing
 tempfile = "3"
-
-# Temporary path override — shroudb-engine-bootstrap 0.3.0 is committed to
-# commons but not yet published to the shroudb registry. Remove once 0.3.0
-# is live on crates.shroudb.dev.
-[patch.shroudb]
-shroudb-engine-bootstrap = { path = "../commons/shroudb-engine-bootstrap" }
