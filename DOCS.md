@@ -95,24 +95,31 @@ timeout_secs = 30
 
 ### CHANNEL CREATE
 
-Create a delivery channel.
+Create a delivery channel. Config may be supplied as a JSON blob (full adapter config) or as keyword args.
 
 ```
 CHANNEL CREATE <name> <type> <config_json>
+CHANNEL CREATE <name> <type> [URL <default_recipient>]
 ```
 
 - `name`: Alphanumeric with hyphens/underscores, max 255 chars
 - `type`: `email` or `webhook`
 - `config_json`: SMTP config for email, webhook config for webhook
+- `URL`: Default recipient URL/address (keyword arg). Populates `default_recipient`, used by `NOTIFY_EVENT` and as a fallback when `DELIVER` omits the recipient.
 
-**Email config:**
+**Email config (JSON form):**
 ```json
 {"host":"smtp.example.com","port":587,"from_address":"noreply@example.com","starttls":true}
 ```
 
-**Webhook config:**
+**Webhook config (JSON form):**
 ```json
 {"timeout_secs":30}
+```
+
+**Keyword form (webhook with default recipient):**
+```
+CHANNEL CREATE alerts webhook URL https://hooks.example.com/alerts
 ```
 
 ### CHANNEL GET
@@ -139,11 +146,14 @@ CHANNEL DELETE <name>
 
 ### DELIVER
 
+Request may be a JSON `DeliveryRequest` or keyword args.
+
 ```
 DELIVER <json>
+DELIVER <channel> <recipient> [SUBJECT <s>] [BODY <b>] [CONTENT_TYPE <t>]
 ```
 
-Delivery request format:
+Delivery request format (JSON form):
 
 ```json
 {
@@ -159,6 +169,8 @@ Delivery request format:
 **Required fields:** `channel`, `recipient`, and one of `body` or `body_encrypted`.
 
 **Priority:** `body_encrypted` > `body`. Callers are responsible for rendering their own message content.
+
+**Keyword form** accepts `SUBJECT`, `BODY`, and `CONTENT_TYPE` (values: `plain` or `html`). For `body_encrypted`, use the JSON form.
 
 ### NOTIFY_EVENT
 

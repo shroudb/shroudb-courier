@@ -132,6 +132,11 @@ async fn handle_channel_create<S: Store>(
         None
     };
 
+    let default_recipient = config
+        .get("default_recipient")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -144,7 +149,7 @@ async fn handle_channel_create<S: Store>(
         webhook,
         enabled: true,
         created_at: now,
-        default_recipient: None,
+        default_recipient,
     };
 
     match engine.channel_create_as(channel, actor).await {

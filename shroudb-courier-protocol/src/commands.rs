@@ -94,6 +94,71 @@ impl CourierCommand {
     }
 }
 
+fn looks_like_json(s: &str) -> bool {
+    s.trim_start().starts_with('{')
+}
+
+fn build_channel_config_json(kv_args: &[&str]) -> Result<String, String> {
+    let mut map = serde_json::Map::new();
+    let mut i = 0;
+    while i < kv_args.len() {
+        let key = kv_args[i].to_uppercase();
+        let val = kv_args
+            .get(i + 1)
+            .ok_or_else(|| format!("CHANNEL CREATE option {key} requires a value"))?;
+        match key.as_str() {
+            "URL" => {
+                map.insert(
+                    "default_recipient".into(),
+                    serde_json::Value::String((*val).to_string()),
+                );
+            }
+            other => {
+                return Err(format!("unknown CHANNEL CREATE option: {other}"));
+            }
+        }
+        i += 2;
+    }
+    Ok(serde_json::Value::Object(map).to_string())
+}
+
+fn build_deliver_request_json(
+    channel: &str,
+    recipient: &str,
+    kv_args: &[&str],
+) -> Result<String, String> {
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "channel".into(),
+        serde_json::Value::String(channel.to_string()),
+    );
+    map.insert(
+        "recipient".into(),
+        serde_json::Value::String(recipient.to_string()),
+    );
+    let mut i = 0;
+    while i < kv_args.len() {
+        let key = kv_args[i].to_uppercase();
+        let val = kv_args
+            .get(i + 1)
+            .ok_or_else(|| format!("DELIVER option {key} requires a value"))?;
+        let field = match key.as_str() {
+            "SUBJECT" => "subject",
+            "BODY" => "body",
+            "CONTENT_TYPE" => "content_type",
+            other => return Err(format!("unknown DELIVER option: {other}")),
+        };
+        let value = if field == "content_type" {
+            serde_json::Value::String(val.to_lowercase())
+        } else {
+            serde_json::Value::String((*val).to_string())
+        };
+        map.insert(field.into(), value);
+        i += 2;
+    }
+    Ok(serde_json::Value::Object(map).to_string())
+}
+
 fn extract_channel(json: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()
@@ -123,13 +188,21 @@ pub fn parse_command(args: &[&str]) -> Result<CourierCommand, String> {
             let sub = args[1].to_uppercase();
             match sub.as_str() {
                 "CREATE" => {
-                    if args.len() < 5 {
-                        return Err("CHANNEL CREATE requires <name> <type> <config_json>".into());
+                    if args.len() < 4 {
+                        return Err(
+                            "CHANNEL CREATE requires <name> <type> [<config_json> | keyword args]"
+                                .into(),
+                        );
                     }
+                    let config_json = if args.len() == 5 && looks_like_json(args[4]) {
+                        args[4].to_string()
+                    } else {
+                        build_channel_config_json(&args[4..])?
+                    };
                     Ok(CourierCommand::ChannelCreate {
                         name: args[2].to_string(),
                         channel_type: args[3].to_string(),
-                        config_json: args[4].to_string(),
+                        config_json,
                     })
                 }
                 "GET" => {
@@ -166,11 +239,23 @@ pub fn parse_command(args: &[&str]) -> Result<CourierCommand, String> {
 
         "DELIVER" => {
             if args.len() < 2 {
-                return Err("DELIVER requires a JSON request".into());
+                return Err(
+                    "DELIVER requires a JSON request or <channel> <recipient> [keyword args]"
+                        .into(),
+                );
             }
-            Ok(CourierCommand::Deliver {
-                request_json: args[1].to_string(),
-            })
+            let request_json = if looks_like_json(args[1]) {
+                args[1].to_string()
+            } else {
+                if args.len() < 3 {
+                    return Err(
+                        "DELIVER requires <channel> <recipient> [SUBJECT s] [BODY b] [CONTENT_TYPE t]"
+                            .into(),
+                    );
+                }
+                build_deliver_request_json(args[1], args[2], &args[3..])?
+            };
+            Ok(CourierCommand::Deliver { request_json })
         }
 
         "DELIVERY" => {
@@ -492,5 +577,120 @@ mod tests {
             }
             _ => panic!("expected Namespace requirement"),
         }
+    }
+
+    /// F-courier-8 (MED): `CHANNEL CREATE` and `DELIVER` historically only
+    /// accepted a JSON-blob payload (an `SmtpConfig` / `WebhookConfig` object
+    /// or a full `DeliveryRequest`). This was inconsistent with every other
+    /// ShrouDB engine's wire surface — including courier's own `DELIVERY LIST`
+    /// — which uses keyword args (`FIELD`, `MODE`, `LIMIT`, `CHANNEL`, etc.).
+    /// It also blocked moat's `debt_6_courier_must_record_chronicle_events`
+    /// integration test, whose commands (`URL …` on create, `SUBJECT …`/`BODY …`
+    /// on deliver) failed at parse before reaching the engine. The parser must
+    /// accept keyword-arg forms in addition to the legacy JSON-blob forms.
+    #[test]
+    fn debt_8_parse_command_must_accept_keyword_arg_forms() {
+        // --- CHANNEL CREATE keyword form ---
+        // `URL <default_recipient>` is the minimum keyword supported today;
+        // SMTP_HOST/SMTP_PORT/etc are separate follow-ups.
+        let cmd = parse_command(&[
+            "CHANNEL",
+            "CREATE",
+            "debt-ch",
+            "webhook",
+            "URL",
+            "https://example.com/hook",
+        ])
+        .expect("keyword-arg CHANNEL CREATE must parse");
+        match cmd {
+            CourierCommand::ChannelCreate {
+                name,
+                channel_type,
+                config_json,
+            } => {
+                assert_eq!(name, "debt-ch");
+                assert_eq!(channel_type, "webhook");
+                let v: serde_json::Value =
+                    serde_json::from_str(&config_json).expect("keyword form must emit valid JSON");
+                assert_eq!(
+                    v.get("default_recipient").and_then(|x| x.as_str()),
+                    Some("https://example.com/hook"),
+                    "URL keyword must populate default_recipient; got {config_json}"
+                );
+            }
+            _ => panic!("expected ChannelCreate"),
+        }
+
+        // No keyword args at all: empty config is valid.
+        let cmd = parse_command(&["CHANNEL", "CREATE", "bare", "webhook"])
+            .expect("CHANNEL CREATE without optional keywords must parse");
+        match cmd {
+            CourierCommand::ChannelCreate { config_json, .. } => {
+                let v: serde_json::Value =
+                    serde_json::from_str(&config_json).expect("empty config must be valid JSON");
+                assert!(v.is_object(), "expected object, got {config_json}");
+                assert!(
+                    v.as_object().unwrap().is_empty(),
+                    "expected empty object, got {config_json}"
+                );
+            }
+            _ => panic!("expected ChannelCreate"),
+        }
+
+        // --- DELIVER keyword form ---
+        let cmd = parse_command(&[
+            "DELIVER",
+            "debt-ch",
+            "https://example.com/hook",
+            "SUBJECT",
+            "s",
+            "BODY",
+            "b",
+        ])
+        .expect("keyword-arg DELIVER must parse");
+        match cmd {
+            CourierCommand::Deliver { request_json } => {
+                let v: serde_json::Value =
+                    serde_json::from_str(&request_json).expect("keyword form must emit valid JSON");
+                assert_eq!(v.get("channel").and_then(|x| x.as_str()), Some("debt-ch"));
+                assert_eq!(
+                    v.get("recipient").and_then(|x| x.as_str()),
+                    Some("https://example.com/hook")
+                );
+                assert_eq!(v.get("subject").and_then(|x| x.as_str()), Some("s"));
+                assert_eq!(v.get("body").and_then(|x| x.as_str()), Some("b"));
+            }
+            _ => panic!("expected Deliver"),
+        }
+
+        // --- Legacy JSON-blob forms must still parse ---
+        let cmd = parse_command(&[
+            "CHANNEL",
+            "CREATE",
+            "legacy",
+            "email",
+            r#"{"host":"s.example","port":587,"from_address":"x@y","starttls":true}"#,
+        ])
+        .expect("JSON-blob CHANNEL CREATE must still parse");
+        assert!(matches!(cmd, CourierCommand::ChannelCreate { .. }));
+
+        let cmd = parse_command(&["DELIVER", r#"{"channel":"x","recipient":"y","body":"z"}"#])
+            .expect("JSON-blob DELIVER must still parse");
+        assert!(matches!(cmd, CourierCommand::Deliver { .. }));
+
+        // --- Unknown keywords must error with a clear message ---
+        let err = parse_command(&["CHANNEL", "CREATE", "x", "webhook", "BOGUS", "v"])
+            .expect_err("unknown keyword must be rejected");
+        assert!(
+            err.to_uppercase().contains("BOGUS"),
+            "error should name the offending keyword; got: {err}"
+        );
+
+        let err = parse_command(&["DELIVER", "ch", "rec", "BOGUS", "v"])
+            .expect_err("unknown keyword must be rejected");
+        assert!(
+            err.to_uppercase().contains("BOGUS"),
+            "error should name the offending keyword; got: {err}"
+        );
     }
 }

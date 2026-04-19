@@ -58,13 +58,14 @@ parameters = [
 response = { status = "string" }
 
 [commands.CHANNEL_CREATE]
-syntax = "CHANNEL CREATE <name> <type> <config_json>"
-description = "Create a delivery channel"
+syntax = "CHANNEL CREATE <name> <type> (<config_json> | [URL <default_recipient>])"
+description = "Create a delivery channel. Config may be supplied as a JSON blob or as keyword args."
 acl = "admin"
 parameters = [
     { name = "name", type = "channel_name", required = true, description = "Channel name" },
     { name = "type", type = "channel_type", required = true, description = "Channel type (email, webhook)" },
-    { name = "config_json", type = "json_value", required = true, description = "Adapter configuration" },
+    { name = "config_json", type = "json_value", required = false, description = "Adapter configuration (legacy JSON-blob form); omit when using keyword args" },
+    { name = "URL", type = "string", required = false, description = "Default recipient URL/address (keyword arg; alternative to config_json)" },
 ]
 response = { status = "string", name = "string", channel_type = "string" }
 
@@ -104,11 +105,16 @@ parameters = [
 response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer" }
 
 [commands.DELIVER]
-syntax = "DELIVER <json>"
-description = "Decrypt recipient and deliver a message"
+syntax = "DELIVER (<json> | <channel> <recipient> [SUBJECT <s>] [BODY <b>] [CONTENT_TYPE <t>])"
+description = "Decrypt recipient and deliver a message. Request may be a JSON DeliveryRequest or keyword args."
 acl = "namespace_write"
 parameters = [
-    { name = "json", type = "json_value", required = true, description = "Delivery request" },
+    { name = "json", type = "json_value", required = false, description = "Full DeliveryRequest (legacy JSON-blob form)" },
+    { name = "channel", type = "channel_name", required = false, description = "Channel name (keyword-arg form)" },
+    { name = "recipient", type = "string", required = false, description = "Recipient address/URL (keyword-arg form)" },
+    { name = "SUBJECT", type = "string", required = false, description = "Message subject (keyword arg)" },
+    { name = "BODY", type = "string", required = false, description = "Message body (keyword arg)" },
+    { name = "CONTENT_TYPE", type = "string", required = false, description = "Content type: plain|html (keyword arg)" },
 ]
 response = { delivery_id = "string", channel = "string", status = "string", delivered_at = "integer" }
 
