@@ -113,6 +113,15 @@ fn build_channel_config_json(kv_args: &[&str]) -> Result<String, String> {
                     serde_json::Value::String((*val).to_string()),
                 );
             }
+            // The generated SDK wire form passes the raw JSON blob under
+            // the parameter name `config_json`. Accept `CONFIG_JSON
+            // <json>` as equivalent to the positional JSON-blob form —
+            // the value replaces the whole config object.
+            "CONFIG_JSON" => {
+                let parsed: serde_json::Value = serde_json::from_str(val)
+                    .map_err(|e| format!("CONFIG_JSON value must be valid JSON: {e}"))?;
+                return Ok(parsed.to_string());
+            }
             other => {
                 return Err(format!("unknown CHANNEL CREATE option: {other}"));
             }
