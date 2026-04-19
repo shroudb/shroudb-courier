@@ -23,10 +23,14 @@ pub struct CourierServerConfig {
     /// Optional HMAC-SHA256 signing secret for webhook deliveries.
     /// When set, each webhook POST includes an `X-ShrouDB-Signature` header.
     pub webhook_signing_secret: Option<String>,
-    /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
+    /// Audit (Chronicle) capability slot. Absent = use
+    /// `AuditConfig::default()`, which `shroudb-engine-bootstrap` 0.3.0
+    /// resolves to `mode = "embedded"`. Set explicitly to override (e.g.
+    /// `mode = "remote"` or `mode = "disabled"` with justification).
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Same contract.
+    /// Policy (Sentry) capability slot. Same contract as `audit` —
+    /// absent = embedded by default under engine-bootstrap 0.3.0.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
 }
