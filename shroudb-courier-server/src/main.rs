@@ -298,6 +298,12 @@ async fn run_server<S: Store + 'static>(
     // Auth
     let token_validator = cfg.auth.build_validator();
 
+    // Audit-on requires an authenticated actor at the engine layer.
+    // Refuse to start with [audit] enabled but [auth].tokens empty.
+    audit_cfg
+        .require_auth_validator(token_validator.is_some())
+        .context("invalid [audit] / [auth] composition")?;
+
     // TCP listener
     let listener = TcpListener::bind(&cfg.server.tcp_bind).await?;
     let tcp_bind = cfg.server.tcp_bind.clone();

@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "LicenseRef-Proprietary"
@@ -19,10 +19,10 @@ publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-courier-core = { path = "shroudb-courier-core", version = "2.0.0", registry = "shroudb" }
-shroudb-courier-engine = { path = "shroudb-courier-engine", version = "2.0.0", registry = "shroudb" }
-shroudb-courier-protocol = { path = "shroudb-courier-protocol", version = "2.0.0", registry = "shroudb" }
-shroudb-courier-client = { path = "shroudb-courier-client", version = "2.0.0", registry = "shroudb" }
+shroudb-courier-core = { path = "shroudb-courier-core", version = "2.1.0", registry = "shroudb" }
+shroudb-courier-engine = { path = "shroudb-courier-engine", version = "2.1.0", registry = "shroudb" }
+shroudb-courier-protocol = { path = "shroudb-courier-protocol", version = "2.1.0", registry = "shroudb" }
+shroudb-courier-client = { path = "shroudb-courier-client", version = "2.1.0", registry = "shroudb" }
 
 # Cipher (embedded in-process option for courier-server)
 shroudb-cipher-engine = { version = "1.6.0", registry = "shroudb" }
@@ -39,7 +39,7 @@ shroudb-chronicle-core = { version = "1.11.0", registry = "shroudb" }
 shroudb-protocol-wire = { version = "0.2.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.2.2", registry = "shroudb" }
 shroudb-server-bootstrap = { version = "0.2.0", registry = "shroudb" }
-shroudb-engine-bootstrap = { version = "0.3.0", registry = "shroudb" }
+shroudb-engine-bootstrap = { version = "0.4.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.2.0", registry = "shroudb" }
 
 # Async
